@@ -1,0 +1,63 @@
+# ── Model weights & large binaries (never commit; tracked via the registry) ──
+*.pt
+*.onnx
+*.pth
+*.rar
+*.zip
+
+# ── Model bundle store: track manifests + pointer/registry logs, ignore weights ──
+model_store/*/*.pt
+model_store/*/*.json
+!model_store/*/bundle.json
+!model_store/ACTIVE.json
+!model_store/registry.jsonl
+
+# ── Audio (except the small tracked golden clips) ──
+*.wav
+*.m4a
+*.mp3
+*.flac
+*.ogg
+*.opus
+!tests/golden_clips/**
+
+# ── Experiment tracking / run outputs ──
+mlruns/
+mlflow.db
+output/
+*_report_*.txt
+*_report_*.json
+drift_log.jsonl
+drift_alert_state.json
+
+# ── Large data / corpora / generated sets ──
+data/
+cv-corpus-*/
+bias_audit/
+bias_audit_fakes/
+studio_clips/
+studio_fake_test/
+studio_fp_results/
+studio_processed_fake_test/
+v8_finetune_combined/
+adapted_checkpoints/
+new_samples/
+held_out/
+
+# ── Nested duplicate project directory (do not track) ──
+voice_guard 0ffline/
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# ── Scratch / editor ──
+phase_plan.txt
+*.tmp
+.DS_Store
+.vscode/
+.idea/
