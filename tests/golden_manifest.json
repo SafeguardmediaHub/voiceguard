@@ -1,0 +1,41 @@
+{
+  "score_tol": 0.001,
+  "clips": {
+    "real_studio_037.mp3": {
+      "score": 0.1062,
+      "verdict": "AUTO_REAL",
+      "model_version": "V9",
+      "chunks": 3,
+      "stage1_chunks": 0,
+      "stage2_chunks": 3,
+      "truth": "real"
+    },
+    "real_studio_055.mp3": {
+      "score": 0.1088,
+      "verdict": "AUTO_REAL",
+      "model_version": "V9",
+      "chunks": 3,
+      "stage1_chunks": 0,
+      "stage2_chunks": 3,
+      "truth": "real"
+    },
+    "fake_noizai_a4cd.mp3": {
+      "score": 0.9235,
+      "verdict": "AUTO_FAKE",
+      "model_version": "V9",
+      "chunks": 6,
+      "stage1_chunks": 5,
+      "stage2_chunks": 1,
+      "truth": "fake"
+    },
+    "fake_concert_hall.mp3": {
+      "score": 0.8,
+      "verdict": "LIKELY_FAKE",
+      "model_version": "V9",
+      "chunks": 6,
+      "stage1_chunks": 1,
+      "stage2_chunks": 5,
+      "truth": "fake"
+    }
+  }
+}

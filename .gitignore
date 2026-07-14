@@ -61,3 +61,50 @@ phase_plan.txt
 .DS_Store
 .vscode/
 .idea/
+
+# API key store (per-environment; hashed keys, never commit)
+auth_keys.json
+
+# Async job queue runtime state (per-environment)
+jobs.db
+jobs.db-wal
+jobs.db-shm
+jobs_input/
+
+# Load-test runtime artifacts (per-run throwaway)
+loadtest_jobs.db
+loadtest_jobs.db-*
+loadtest_keys.json
+loadtest_input/
+
+# ── Session scratch & dev-only (not part of the shipped project) ──
+.superpowers/
+explain_out/
+archive/
+*_backup.py
+debug.py
+file.py
+_v8mod.py
+*.log
+
+# ── One-off / superseded scripts (not part of the shipped system) ──
+averstial_detector.py
+bias_1.py
+bias_2.py
+fre_arab.py
+drift_monitor.py
+fetch_studio_clips.py
+fetch_studio_clips1.py
+studio_fp_check.py
+studio_processed_fake_test.py
+cascade_bias_audit_eval_cell.py
+v8_finetune_combined.py
+# old HTML backups (the served UI is "VoiceGuard_LiveDemo (2).html")
+VoiceGuard_Demo.html
+VoiceGuard_LiveDemo.html
+
+# ── Raw model artifacts (weights + training intermediates) — deployed via the bundle + Spaces ──
+models/
+# data-collection url lists + per-environment drift baseline
+urls_*.txt
+drift_baseline.json

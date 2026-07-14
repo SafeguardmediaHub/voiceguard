@@ -1,0 +1,42 @@
+[
+  {
+    "seq": 0,
+    "version": "v9",
+    "prev_version": null,
+    "activated_at": "2026-07-07T10:23:55.811748+00:00",
+    "actor": "migration",
+    "reason": "initial V9 bundle",
+    "prev_sha": "GENESIS",
+    "entry_sha": "8f4251b2dbaa9172df3cbf2e5b2d790f9827cc9c28101428e961aeb1384ecc62"
+  },
+  {
+    "seq": 1,
+    "version": "v9h",
+    "prev_version": "v9",
+    "activated_at": "2026-07-12T12:06:11.072549+00:00",
+    "actor": "route-b",
+    "reason": "V8 AASIST + hybrid fusion + CASCADE_LOW 0.10",
+    "prev_sha": "8f4251b2dbaa9172df3cbf2e5b2d790f9827cc9c28101428e961aeb1384ecc62",
+    "entry_sha": "ac7982367a4fe7362e40fd49b8c09ca88211b11f1af68f145f31aed3b6709191"
+  },
+  {
+    "seq": 2,
+    "version": "v9fixed",
+    "prev_version": "v9h",
+    "activated_at": "2026-07-14T13:28:47.052964+00:00",
+    "actor": "aasist-retrain",
+    "reason": "proper AASIST retrain + refit \u2014 candidate",
+    "prev_sha": "ac7982367a4fe7362e40fd49b8c09ca88211b11f1af68f145f31aed3b6709191",
+    "entry_sha": "7ee3da453de20c4b10538b3467d9e303341d3c5d28070e21cda4f0dd650b67b5"
+  },
+  {
+    "seq": 3,
+    "version": "v9h",
+    "prev_version": "v9fixed",
+    "activated_at": "2026-07-14T16:54:20.922153+00:00",
+    "actor": "eval",
+    "reason": "v9fixed no better than v9h; keep v9h",
+    "prev_sha": "7ee3da453de20c4b10538b3467d9e303341d3c5d28070e21cda4f0dd650b67b5",
+    "entry_sha": "12316775c56b0e7eb63d662a877f4d4f4b7c813f00bde848aa827d9f982aea46"
+  }
+]

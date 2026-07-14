@@ -1,0 +1,25 @@
+# VoiceGuard — API + worker. Both share the model bundle + job queue via named volumes.
+# Provide secrets in a .env file (SPACES_*, VOICEGUARD_*). See docs/API_REFERENCE.md.
+services:
+  api:
+    build: .
+    command: ["api"]
+    ports: ["7860:7860"]
+    env_file: [.env]
+    environment: { WORKERS: "3" }
+    volumes:
+      - vg-data:/data
+      - vg-models:/app/model_store
+    restart: unless-stopped
+  worker:
+    build: .
+    command: ["worker"]
+    env_file: [.env]
+    volumes:
+      - vg-data:/data
+      - vg-models:/app/model_store
+    depends_on: [api]
+    restart: unless-stopped
+volumes:
+  vg-data:
+  vg-models:

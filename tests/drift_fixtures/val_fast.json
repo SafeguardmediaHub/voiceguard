@@ -1,0 +1,32 @@
+[
+  {
+    "path": "C:\\Users\\Michael Ologungbara\\Downloads\\voice_guard 0ffline\\data\\held_out\\real\\4a952779bfb8_chunk_000.mp3",
+    "label": 0,
+    "source": "real_local"
+  },
+  {
+    "path": "C:\\Users\\Michael Ologungbara\\Downloads\\voice_guard 0ffline\\data\\held_out\\real\\4a952779bfb8_chunk_018.mp3",
+    "label": 0,
+    "source": "real_local"
+  },
+  {
+    "path": "C:\\Users\\Michael Ologungbara\\Downloads\\voice_guard 0ffline\\data\\held_out\\real\\4a952779bfb8_chunk_037.mp3",
+    "label": 0,
+    "source": "real_local"
+  },
+  {
+    "path": "C:\\Users\\Michael Ologungbara\\Downloads\\voice_guard 0ffline\\data\\held_out\\fake\\2927f28c_a4cd0327-6_v2.mp3",
+    "label": 1,
+    "source": "fake_local"
+  },
+  {
+    "path": "C:\\Users\\Michael Ologungbara\\Downloads\\voice_guard 0ffline\\data\\held_out\\fake\\2927f28c_bbc40106-2_v1.mp3",
+    "label": 1,
+    "source": "fake_local"
+  },
+  {
+    "path": "C:\\Users\\Michael Ologungbara\\Downloads\\voice_guard 0ffline\\data\\held_out\\fake\\concert_hall.mp3",
+    "label": 1,
+    "source": "fake_local"
+  }
+]

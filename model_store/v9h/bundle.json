@@ -1,0 +1,43 @@
+{
+  "version": "v9h",
+  "notes": "Route B: V8 AASIST + hybrid XGBoost fusion (xgb/cal_v9_hybrid); CASCADE_LOW 0.20->0.10.",
+  "cascade": {
+    "low_thresh": 0.1,
+    "high_thresh": 0.7999999999999999,
+    "platt": {
+      "coef": 10.931015172508893,
+      "intercept": -4.1480804970891425
+    }
+  },
+  "smoke_check": {
+    "clip": "tests/golden_clips/fake_noizai_a4cd.mp3",
+    "expected_verdicts": [
+      "LIKELY_FAKE",
+      "AUTO_FAKE"
+    ]
+  },
+  "files": {
+    "aasist.pt": {
+      "sha256": "bf6fb21a18dbf4f12b6d5fae32aade92ad28e4a7f26f989f5c29356900bc5c88"
+    },
+    "cal.json": {
+      "sha256": "504795f1b54bf5bad1030e693c36afa2745e512726eed30b2313d7debb7344a3"
+    },
+    "lcnn.pt": {
+      "sha256": "f0f920043de1f4206c5192a4f4c06fe30908e38365409a71c6b21bec5104b3b8"
+    },
+    "rawnet.pt": {
+      "sha256": "8d8fba7687bdaf37467a64c53660846fa2c056e14995a39e66b7041d6994560f"
+    },
+    "thresholds.json": {
+      "sha256": "ea17384d9b7049712c48dbb01a0e5775e84273552605938b01ca0035e5f77cab"
+    },
+    "wav2vec.pt": {
+      "sha256": "37c916e8aa13f52a08f4599573ba380bb85c6dc58562602738bf2bd63e4eb8fc"
+    },
+    "xgb.json": {
+      "sha256": "446a768aaa0f7e1308e2f18ae1bbe616bd3ce5652e7646bf434dd1b5f5685064"
+    }
+  },
+  "created_at": "2026-07-12T12:06:06.622625+00:00"
+}

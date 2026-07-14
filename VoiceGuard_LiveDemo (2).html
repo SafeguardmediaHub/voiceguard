@@ -1,0 +1,1580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VoiceGuard V9 — Live Detection Demo</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #1a1e26;
+    --panel-2: #232831;
+    --text: #e8ecf3;
+    --text-dim: #8a93a6;
+    --border: #2d333f;
+    --green: #3dd68c;
+    --yellow: #f5b942;
+    --orange: #f59042;
+    --red: #ef5350;
+    --blue: #5b8def;
+    --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  header { margin-bottom: 24px; }
+  h1 { margin: 0 0 6px 0; font-size: 28px; font-weight: 600; }
+  .subtitle { color: var(--text-dim); font-size: 14px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+  .tab {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--blue); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  button.primary {
+    background: var(--blue);
+    color: white;
+    border: none;
+    padding: 14px 24px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button.primary:hover { background: #4978db; }
+  button.primary:disabled { background: var(--border); cursor: not-allowed; opacity: 0.7; }
+  button.primary.recording {
+    background: var(--red);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  button.primary.playing { background: var(--green); color: #0f1115; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.65; }
+  }
+  .status { color: var(--text-dim); font-size: 14px; flex: 1 1 200px; }
+  .status.live { color: var(--green); }
+  .status.error { color: var(--red); }
+
+  .file-picker { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .file-picker input[type="file"] {
+    color: var(--text-dim);
+    font-size: 14px;
+    background: var(--panel-2);
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    flex: 1;
+  }
+  audio { display: none; }
+
+  .meter-wrap, .progress-wrap {
+    height: 8px;
+    background: var(--panel-2);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .progress-wrap { height: 6px; }
+  .meter-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), var(--yellow), var(--red));
+    width: 0%;
+    transition: width 0.05s linear;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--blue);
+    width: 0%;
+    transition: width 0.3s;
+  }
+
+  .verdict-card {
+    text-align: center;
+    padding: 28px 20px 24px;
+    border-radius: 12px;
+    margin-bottom: 16px;
+    border: 2px solid var(--border);
+    background: var(--panel-2);
+    transition: all 0.3s;
+  }
+  .verdict-label {
+    color: var(--text-dim);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 12px;
+  }
+  .verdict-value { font-size: 32px; font-weight: 700; margin-bottom: 6px; }
+  .verdict-score { font-size: 14px; color: var(--text-dim); }
+  .verdict-card.auto_real    { border-color: var(--green);  background: rgba(61, 214, 140, 0.08); }
+  .verdict-card.auto_real .verdict-value { color: var(--green); }
+  .verdict-card.review       { border-color: var(--yellow); background: rgba(245, 185, 66, 0.08); }
+  .verdict-card.review .verdict-value { color: var(--yellow); }
+  .verdict-card.likely_fake  { border-color: var(--orange); background: rgba(245, 144, 66, 0.10); }
+  .verdict-card.likely_fake .verdict-value { color: var(--orange); }
+  .verdict-card.auto_fake    { border-color: var(--red);    background: rgba(239, 83, 80, 0.10); }
+  .verdict-card.auto_fake .verdict-value { color: var(--red); }
+
+  /* ── Watermark panel (new) ────────────────────────────────────── */
+  .watermark-panel {
+    display: none;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 16px;
+    border-left: 4px solid var(--border);
+    background: var(--panel-2);
+  }
+  .watermark-panel.show { display: flex; align-items: flex-start; gap: 14px; }
+  .watermark-panel.detected {
+    border-left-color: var(--purple);
+    background: rgba(167, 139, 250, 0.08);
+  }
+  .watermark-panel.not_detected {
+    border-left-color: var(--border);
+    background: var(--panel-2);
+  }
+  .watermark-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+  .watermark-panel.detected .watermark-icon {
+    background: rgba(167, 139, 250, 0.20);
+    color: var(--purple);
+  }
+  .watermark-panel.not_detected .watermark-icon {
+    background: var(--border);
+    color: var(--text-dim);
+  }
+  .watermark-content { flex: 1; }
+  .watermark-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .watermark-panel.detected .watermark-title { color: var(--purple); }
+  .watermark-panel.not_detected .watermark-title { color: var(--text); }
+  .watermark-detail {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.55;
+  }
+  .watermark-segments {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+  }
+  .watermark-seg-row {
+    font-size: 12px;
+    font-family: ui-monospace, monospace;
+    color: var(--text);
+    padding: 4px 8px;
+    background: rgba(167, 139, 250, 0.12);
+    border-radius: 4px;
+    display: inline-block;
+    margin-right: 6px;
+  }
+
+  /* ── Segment timeline ────────────────────────────────────────── */
+  .timeline-panel {
+    background: var(--panel-2);
+    border-radius: 8px;
+    padding: 16px 20px 20px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .timeline-panel.show { display: block; }
+  .timeline-heading {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .timeline-sub {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+  .timeline {
+    display: flex;
+    width: 100%;
+    height: 32px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--border);
+    margin-bottom: 6px;
+  }
+  .timeline-segment {
+    flex-grow: 1;
+    cursor: default;
+    transition: opacity 0.15s;
+    border-right: 1px solid var(--bg);
+    min-width: 2px;
+  }
+  .timeline-segment:last-child { border-right: none; }
+  .timeline-segment:hover { opacity: 0.85; }
+  .timeline-segment.auto_real   { background: var(--green); }
+  .timeline-segment.review      { background: var(--yellow); }
+  .timeline-segment.likely_fake { background: var(--orange); }
+  .timeline-segment.auto_fake   { background: var(--red); }
+
+  .timeline-axis {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  .flagged-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .flagged-list-empty {
+    color: var(--text-dim);
+    font-size: 13px;
+    padding: 6px 0;
+    font-style: italic;
+  }
+  .flagged-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--panel);
+    border-radius: 6px;
+    font-size: 13px;
+    border-left: 3px solid var(--border);
+  }
+  .flagged-row.review      { border-left-color: var(--yellow); }
+  .flagged-row.likely_fake { border-left-color: var(--orange); }
+  .flagged-row.auto_fake   { border-left-color: var(--red); }
+  .flagged-row .time-range { color: var(--text-dim); font-size: 12px; min-width: 100px; }
+  .flagged-row .verdict { min-width: 110px; font-weight: 500; }
+  .flagged-row.review      .verdict { color: var(--yellow); }
+  .flagged-row.likely_fake .verdict { color: var(--orange); }
+  .flagged-row.auto_fake   .verdict { color: var(--red); }
+  .flagged-row .seg-score { color: var(--text-dim); margin-left: auto; }
+
+  /* ── Explanation panel ────────────────────────────────────────── */
+  .explain-panel {
+    background: var(--panel-2);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 18px;
+    display: none;
+  }
+  .explain-panel.show { display: block; }
+  .explain-summary {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text);
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .explain-heading {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+  .obs-list { display: flex; flex-direction: column; gap: 10px; }
+  .obs {
+    display: flex;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--panel);
+    border-radius: 6px;
+    border-left: 3px solid var(--border);
+  }
+  .obs.toward_fake { border-left-color: var(--orange); }
+  .obs.toward_real { border-left-color: var(--green); }
+  .obs-icon {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    margin-top: 1px;
+  }
+  .obs.toward_fake .obs-icon { background: rgba(245, 144, 66, 0.20); color: var(--orange); }
+  .obs.toward_real .obs-icon { background: rgba(61, 214, 140, 0.20); color: var(--green); }
+  .obs.neutral .obs-icon     { background: var(--border); color: var(--text-dim); }
+  .obs-content { flex: 1; }
+  .obs-title { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+  .obs-detail { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+
+  .measurements-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 12px;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 0;
+    margin-top: 12px;
+  }
+  .measurements-toggle:hover { color: var(--text); }
+  .measurements {
+    display: none;
+    margin-top: 12px;
+    padding: 12px;
+    background: var(--panel);
+    border-radius: 6px;
+    font-family: ui-monospace, "SF Mono", Monaco, monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+  .measurements.show { display: block; }
+  .measurements .m-row { display: flex; justify-content: space-between; gap: 12px; }
+  .measurements .m-key { color: var(--text-dim); }
+  .measurements .m-val { color: var(--text); }
+
+  /* ── Cascade routing panel ────────────────────────────────────── */
+  .cascade-panel {
+    background: var(--panel-2);
+    border-radius: 8px;
+    padding: 16px 20px 18px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .cascade-panel.show { display: block; }
+  .cascade-heading {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .cascade-sub { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; line-height: 1.5; }
+  .cascade-bar {
+    display: flex;
+    width: 100%;
+    height: 30px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--border);
+    margin-bottom: 10px;
+  }
+  .cascade-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 0;
+    transition: flex-grow 0.3s;
+  }
+  .cascade-seg.stage1 { background: var(--green); color: #0f1115; }
+  .cascade-seg.stage2 { background: var(--blue);  color: #fff; }
+  .cascade-stats {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    font-size: 13px;
+  }
+  .cascade-stat { color: var(--text-dim); }
+  .cascade-stat b { color: var(--text); font-weight: 600; }
+  .cascade-stat .dot {
+    display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+    margin-right: 6px; vertical-align: middle;
+  }
+  .cascade-stat .dot.s1 { background: var(--green); }
+  .cascade-stat .dot.s2 { background: var(--blue); }
+
+  .components {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  @media (max-width: 560px) { .components { grid-template-columns: repeat(2, 1fr); } }
+  .comp { background: var(--panel-2); padding: 14px; border-radius: 8px; text-align: center; }
+  .comp.screener { box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.35); }
+  .comp-name {
+    color: var(--text-dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .comp-tag {
+    display: inline-block;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    color: var(--purple);
+    background: rgba(167, 139, 250, 0.15);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  .comp-value { font-size: 22px; font-weight: 600; }
+  .comp-value.dim { color: var(--text-dim); font-weight: 500; }
+  .comp-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+  .comp-fill { height: 100%; background: var(--blue); width: 0%; transition: width 0.3s; }
+  .comp-fill.screener { background: var(--purple); }
+  .comp-note {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-bottom: 20px;
+    font-style: italic;
+  }
+
+  .history-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .history { display: flex; flex-direction: column; gap: 8px; }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--panel-2);
+    border-radius: 6px;
+    font-size: 13px;
+    border-left: 3px solid var(--border);
+  }
+  .row.auto_real   { border-left-color: var(--green); }
+  .row.review      { border-left-color: var(--yellow); }
+  .row.likely_fake { border-left-color: var(--orange); }
+  .row.auto_fake   { border-left-color: var(--red); }
+  .row .time { color: var(--text-dim); font-size: 12px; min-width: 60px; }
+  .row .verdict { min-width: 110px; font-weight: 500; }
+  .row.auto_real   .verdict { color: var(--green); }
+  .row.review      .verdict { color: var(--yellow); }
+  .row.likely_fake .verdict { color: var(--orange); }
+  .row.auto_fake   .verdict { color: var(--red); }
+  .row .score { color: var(--text-dim); }
+  .row .watermark-flag {
+    color: var(--purple);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 6px;
+    background: rgba(167, 139, 250, 0.15);
+    border-radius: 3px;
+    margin-left: 6px;
+  }
+
+  .footer { margin-top: 24px; color: var(--text-dim); font-size: 12px; text-align: center; }
+  .note {
+    background: rgba(91, 141, 239, 0.08);
+    border-left: 3px solid var(--blue);
+    padding: 12px 16px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 16px;
+    line-height: 1.5;
+  }
+  .note.warn {
+    background: rgba(245, 144, 66, 0.10);
+    border-left-color: var(--orange);
+  }
+
+  /* ── Metadata forensics panel ─────────────────────────────────── */
+  .metadata-panel {
+    display: none;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 16px;
+    border-left: 4px solid var(--border);
+    background: var(--panel-2);
+  }
+  .metadata-panel.show { display: block; }
+  .metadata-panel.toward_fake {
+    border-left-color: var(--orange);
+    background: rgba(245, 144, 66, 0.06);
+  }
+  .metadata-panel.toward_real {
+    border-left-color: var(--green);
+    background: rgba(61, 214, 140, 0.06);
+  }
+  .metadata-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .metadata-title { font-size: 14px; font-weight: 600; }
+  .metadata-summary { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin-bottom: 10px; }
+  .metadata-finding {
+    background: var(--panel);
+    padding: 8px 12px;
+    border-radius: 5px;
+    margin-top: 6px;
+    border-left: 2px solid var(--border);
+  }
+  .metadata-finding.toward_fake { border-left-color: var(--orange); }
+  .metadata-finding.toward_real { border-left-color: var(--green); }
+  .metadata-finding-title {
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+  .metadata-finding-conf {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 6px;
+  }
+  .metadata-finding-detail { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+
+  /* ── C2PA panel ───────────────────────────────────────────────── */
+  .c2pa-panel {
+    display: none;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 16px;
+    border-left: 4px solid var(--border);
+    background: var(--panel-2);
+  }
+  .c2pa-panel.show { display: flex; align-items: flex-start; gap: 14px; }
+  .c2pa-panel.ai_declared {
+    border-left-color: var(--red);
+    background: rgba(239, 83, 80, 0.08);
+  }
+  .c2pa-panel.has_credentials {
+    border-left-color: var(--blue);
+    background: rgba(91, 141, 239, 0.08);
+  }
+  .c2pa-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    margin-top: 2px;
+    background: var(--border);
+    color: var(--text-dim);
+  }
+  .c2pa-panel.ai_declared .c2pa-icon { background: rgba(239, 83, 80, 0.20); color: var(--red); }
+  .c2pa-panel.has_credentials .c2pa-icon { background: rgba(91, 141, 239, 0.20); color: var(--blue); }
+  .c2pa-content { flex: 1; }
+  .c2pa-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .c2pa-panel.ai_declared .c2pa-title { color: var(--red); }
+  .c2pa-panel.has_credentials .c2pa-title { color: var(--blue); }
+  .c2pa-detail { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+  .c2pa-meta {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text);
+    font-family: ui-monospace, monospace;
+  }
+  .c2pa-meta-row { margin: 2px 0; }
+  .c2pa-meta-key { color: var(--text-dim); margin-right: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>VoiceGuard V9 — Live Detection</h1>
+    <div class="subtitle">Audio is analyzed in rolling 4-second windows through a two-stage cascade — a fast LCNN screener resolves clear cases, the full 3-model ensemble handles uncertain ones — with explanations, segment timeline, and watermark detection.</div>
+    <div style="margin-top:12px;">
+      <input id="apiKey" type="password" placeholder="API key (vg_...)" style="width:16rem"
+             oninput="localStorage.setItem('vg_key', this.value)">
+    </div>
+  </header>
+
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab active" data-mode="file">Play audio file</button>
+      <button class="tab" data-mode="mic">Live microphone</button>
+    </div>
+
+    <div id="fileMode" class="tab-content active">
+      <div class="note">
+        <strong>Recommended for client demos.</strong> Pick an audio file, click play.
+        The audio is streamed directly to V8 — no microphone, no analog re-capture, so V8 receives
+        the original signal cleanly. This mirrors real deployment.
+      </div>
+      <div class="file-picker">
+        <input type="file" id="fileInput" accept="audio/*">
+      </div>
+      <audio id="audioPlayer" controls></audio>
+      <div class="controls">
+        <button id="playBtn" class="primary" disabled>Play and analyze</button>
+        <button id="stopFileBtn" class="primary" disabled style="background: var(--panel-2);">Stop</button>
+        <div id="fileStatus" class="status">Select an audio file to begin.</div>
+      </div>
+      <div class="progress-wrap"><div id="progress" class="progress-fill"></div></div>
+    </div>
+
+    <div id="micMode" class="tab-content">
+      <div class="note warn">
+        <strong>About the microphone path.</strong> Useful for showing live speech reads as real.
+        For testing fake detection, the <em>Play audio file</em> mode is more representative.
+      </div>
+      <div class="controls">
+        <button id="micBtn" class="primary">Start Listening</button>
+        <div id="micStatus" class="status">Ready. Click "Start Listening" to begin.</div>
+      </div>
+      <div class="meter-wrap"><div id="meter" class="meter-fill"></div></div>
+    </div>
+
+    <div id="verdictCard" class="verdict-card">
+      <div class="verdict-label">Current Verdict</div>
+      <div id="verdictValue" class="verdict-value">—</div>
+      <div id="verdictScore" class="verdict-score">awaiting audio</div>
+    </div>
+
+    <!-- Watermark detection panel -->
+    <div id="watermarkPanel" class="watermark-panel">
+      <div class="watermark-icon" id="watermarkIcon">🔐</div>
+      <div class="watermark-content">
+        <div class="watermark-title" id="watermarkTitle">Watermark check</div>
+        <div class="watermark-detail" id="watermarkDetail">—</div>
+        <div class="watermark-segments" id="watermarkSegments"></div>
+      </div>
+    </div>
+
+    <!-- Metadata forensics panel -->
+    <div id="metadataPanel" class="metadata-panel">
+      <div class="metadata-header">
+        <div class="metadata-title" id="metadataTitle">File metadata analysis</div>
+      </div>
+      <div class="metadata-summary" id="metadataSummary"></div>
+      <div id="metadataFindings"></div>
+    </div>
+
+    <!-- C2PA content credentials panel -->
+    <div id="c2paPanel" class="c2pa-panel">
+      <div class="c2pa-icon" id="c2paIcon">📜</div>
+      <div class="c2pa-content">
+        <div class="c2pa-title" id="c2paTitle">Content credentials</div>
+        <div class="c2pa-detail" id="c2paDetail">—</div>
+        <div class="c2pa-meta" id="c2paMeta"></div>
+      </div>
+    </div>
+
+    <!-- Segment timeline -->
+    <div id="timelinePanel" class="timeline-panel">
+      <div class="timeline-heading">Segment-level timeline</div>
+      <div class="timeline-sub">Each block represents a portion of the audio, colored by its verdict.</div>
+      <div id="timeline" class="timeline"></div>
+      <div id="timelineAxis" class="timeline-axis"></div>
+      <div class="timeline-heading" style="margin-top: 16px;">Flagged segments</div>
+      <div id="flaggedList" class="flagged-list"></div>
+    </div>
+
+    <!-- Explanation panel -->
+    <div id="explainPanel" class="explain-panel">
+      <div id="explainSummary" class="explain-summary"></div>
+      <div class="explain-heading">What we observed in this audio</div>
+      <div id="obsList" class="obs-list"></div>
+      <button class="measurements-toggle" onclick="toggleMeasurements()">Show technical measurements</button>
+      <div id="measurements" class="measurements"></div>
+    </div>
+
+    <!-- Cascade routing panel -->
+    <div id="cascadePanel" class="cascade-panel">
+      <div class="cascade-heading">Cascade routing</div>
+      <div class="cascade-sub" id="cascadeSub">—</div>
+      <div class="cascade-bar" id="cascadeBar"></div>
+      <div class="cascade-stats">
+        <span class="cascade-stat"><span class="dot s1"></span>Stage 1 · LCNN screener: <b id="cascadeS1">—</b></span>
+        <span class="cascade-stat"><span class="dot s2"></span>Stage 2 · full ensemble: <b id="cascadeS2">—</b></span>
+        <span class="cascade-stat">Screener mean: <b id="cascadeLcnn">—</b></span>
+      </div>
+    </div>
+
+    <div class="components">
+      <div class="comp screener">
+        <div class="comp-name">LCNN<span class="comp-tag">SCREENER</span></div>
+        <div id="lcnnValue" class="comp-value">—</div>
+        <div class="comp-bar"><div id="lcnnBar" class="comp-fill screener"></div></div>
+      </div>
+      <div class="comp">
+        <div class="comp-name">AASIST</div>
+        <div id="aasistValue" class="comp-value">—</div>
+        <div class="comp-bar"><div id="aasistBar" class="comp-fill"></div></div>
+      </div>
+      <div class="comp">
+        <div class="comp-name">Wav2Vec</div>
+        <div id="w2vValue" class="comp-value">—</div>
+        <div class="comp-bar"><div id="w2vBar" class="comp-fill"></div></div>
+      </div>
+      <div class="comp">
+        <div class="comp-name">RawNet3</div>
+        <div id="rawnetValue" class="comp-value">—</div>
+        <div class="comp-bar"><div id="rawnetBar" class="comp-fill"></div></div>
+      </div>
+    </div>
+    <div id="compNote" class="comp-note" style="display:none;"></div>
+
+    <!-- Phase 3 explainability signals (confidence, Grad-CAM heatmap, SHAP, flagged segments, acoustic notes, audit id) -->
+    <div id="ex-confidence"></div>
+    <img id="ex-heatmap" alt="Grad-CAM heatmap" style="max-width:100%;display:none">
+    <div id="ex-shap"></div>
+    <div id="ex-segments"></div>
+    <div id="ex-adversarial"></div>
+    <div id="ex-c2pa"></div>
+    <div id="ex-audit" style="font:12px monospace;color:#888"></div>
+  </div>
+
+  <div class="panel">
+    <div class="history-title">Detection history</div>
+    <div id="history" class="history">
+      <div style="color: var(--text-dim); font-size: 13px; padding: 8px 0;">No detections yet.</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    VoiceGuard V9 · Two-stage cascade (LCNN screener → 3-model ensemble) · With explainability, segments, and AudioSeal watermark · Server: <span id="serverUrl">http://localhost:7860</span>
+  </div>
+
+  
+
+</div>
+
+<script>
+'use strict';
+
+const SERVER_URL = 'http://localhost:7860';
+const CHUNK_DURATION_MS = 4000;
+const MAX_HISTORY = 10;
+
+const $ = (id) => document.getElementById(id);
+const tabs = document.querySelectorAll('.tab');
+const fileMode    = $('fileMode');
+const micMode     = $('micMode');
+const fileInput   = $('fileInput');
+const audioPlayer = $('audioPlayer');
+const playBtn     = $('playBtn');
+const stopFileBtn = $('stopFileBtn');
+const fileStatus  = $('fileStatus');
+const progress    = $('progress');
+const micBtn      = $('micBtn');
+const micStatus   = $('micStatus');
+const meterEl     = $('meter');
+const verdictCard  = $('verdictCard');
+const verdictValue = $('verdictValue');
+const verdictScore = $('verdictScore');
+const watermarkPanel = $('watermarkPanel');
+const watermarkIcon = $('watermarkIcon');
+const watermarkTitle = $('watermarkTitle');
+const watermarkDetail = $('watermarkDetail');
+const watermarkSegments = $('watermarkSegments');
+const timelinePanel = $('timelinePanel');
+const timelineEl = $('timeline');
+const timelineAxis = $('timelineAxis');
+const flaggedList = $('flaggedList');
+const explainPanel = $('explainPanel');
+const explainSummary = $('explainSummary');
+const obsList = $('obsList');
+const measurementsEl = $('measurements');
+const aasistValue  = $('aasistValue');
+const w2vValue     = $('w2vValue');
+const rawnetValue  = $('rawnetValue');
+const aasistBar    = $('aasistBar');
+const w2vBar       = $('w2vBar');
+const rawnetBar    = $('rawnetBar');
+const lcnnValue    = $('lcnnValue');
+const lcnnBar      = $('lcnnBar');
+const cascadePanel = $('cascadePanel');
+const cascadeSub   = $('cascadeSub');
+const cascadeBar   = $('cascadeBar');
+const cascadeS1    = $('cascadeS1');
+const cascadeS2    = $('cascadeS2');
+const cascadeLcnn  = $('cascadeLcnn');
+const compNote     = $('compNote');
+const historyEl    = $('history');
+$('serverUrl').textContent = SERVER_URL;
+
+// on load: restore saved API key
+document.getElementById('apiKey').value = localStorage.getItem('vg_key') || '';
+function authHeaders() {
+  const k = (document.getElementById('apiKey').value || '').trim();
+  return k ? { 'Authorization': 'Bearer ' + k } : {};
+}
+
+tabs.forEach(t => {
+  t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    const mode = t.dataset.mode;
+    fileMode.classList.toggle('active', mode === 'file');
+    micMode.classList.toggle('active', mode === 'mic');
+    if (mode === 'file' && isRecording) stopRecording();
+    if (mode === 'mic'  && isFilePlaying) stopFilePlayback();
+  });
+});
+
+function toggleMeasurements() {
+  measurementsEl.classList.toggle('show');
+  const btn = document.querySelector('.measurements-toggle');
+  btn.textContent = measurementsEl.classList.contains('show')
+    ? 'Hide technical measurements'
+    : 'Show technical measurements';
+}
+
+// ── File mode ─────────────────────────────────────────────────────
+let fileAudioBuffer = null;
+let currentFile = null;            // the ORIGINAL uploaded file — sent raw to /detect
+let isFilePlaying = false;
+let fileInflight = 0;
+
+fileInput.addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  currentFile = f;                 // keep the original bytes to send raw to /detect
+  fileStatus.textContent = `Loading "${f.name}"…`;
+  fileStatus.className = 'status';
+  const arrayBuf = await f.arrayBuffer();
+  audioPlayer.src = URL.createObjectURL(f);
+  audioPlayer.style.display = 'block';
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    fileAudioBuffer = await ctx.decodeAudioData(arrayBuf);
+    await ctx.close();
+    const dur = fileAudioBuffer.duration.toFixed(1);
+    fileStatus.textContent = `Loaded "${f.name}" (${dur}s). Click Play and analyze.`;
+    playBtn.disabled = false;
+  } catch (err) {
+    fileStatus.textContent = 'Could not decode this audio file: ' + err.message;
+    fileStatus.className = 'status error';
+    playBtn.disabled = true;
+  }
+});
+
+playBtn.addEventListener('click', () => { if (fileAudioBuffer) startFilePlayback(); });
+stopFileBtn.addEventListener('click', stopFilePlayback);
+
+function startFilePlayback() {
+  isFilePlaying = true;
+  fileInflight = 0;
+  playBtn.disabled = true;
+  playBtn.classList.add('playing');
+  stopFileBtn.disabled = false;
+  fileStatus.textContent = 'Sending full audio to V8 for segment analysis…';
+  fileStatus.className = 'status live';
+  progress.style.width = '0%';
+  audioPlayer.currentTime = 0;
+  audioPlayer.play().catch(() => {});
+
+  sendFullFile();
+
+  function updateProgress() {
+    if (!isFilePlaying || !fileAudioBuffer) return;
+    const pct = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+    progress.style.width = Math.min(100, pct) + '%';
+    if (audioPlayer.ended) { progress.style.width = '100%'; return; }
+    requestAnimationFrame(updateProgress);
+  }
+  updateProgress();
+}
+
+async function sendFullFile() {
+  // Send the ORIGINAL file bytes — no browser decode/resample/channel-drop, which
+  // smooths the high-frequency artifacts the detector keys on. The server (ffmpeg)
+  // decodes at full quality. The Web Audio decode above is only for the waveform + playback.
+  if (!currentFile) return;
+  await sendChunkToServer(currentFile, 'file');
+}
+
+function pcmToWav(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    offset += 2;
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+function writeString(view, offset, str) {
+  for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+}
+
+function stopFilePlayback() {
+  isFilePlaying = false;
+  audioPlayer.pause();
+  playBtn.disabled = false;
+  playBtn.classList.remove('playing');
+  stopFileBtn.disabled = true;
+  if (fileInflight === 0) {
+    fileStatus.textContent = 'Stopped. Choose another file or hit Play again.';
+    fileStatus.className = 'status';
+  }
+}
+
+// ── Mic mode ──────────────────────────────────────────────────────
+let mediaRecorder = null;
+let audioStream = null;
+let audioContext = null;
+let analyser = null;
+let meterAnimationId = null;
+let isRecording = false;
+let micInflight = 0;
+
+micBtn.addEventListener('click', () => {
+  if (isRecording) stopRecording(); else startRecording();
+});
+
+async function startRecording() {
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1, sampleRate: 16000,
+        echoCancellation: true, noiseSuppression: false, autoGainControl: false,
+      }
+    });
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    const source = audioContext.createMediaStreamSource(audioStream);
+    source.connect(analyser);
+    runMeter();
+    isRecording = true;
+    micBtn.textContent = 'Stop Listening';
+    micBtn.classList.add('recording');
+    micStatus.textContent = 'Listening. Speak normally.';
+    micStatus.className = 'status live';
+    recordChunk();
+  } catch (err) {
+    micStatus.textContent = 'Microphone access denied or unavailable: ' + err.message;
+    micStatus.className = 'status error';
+  }
+}
+
+function stopRecording() {
+  isRecording = false;
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') { try { mediaRecorder.stop(); } catch (e) {} }
+  if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
+  if (audioContext) { try { audioContext.close(); } catch (e) {} audioContext = null; }
+  if (meterAnimationId) { cancelAnimationFrame(meterAnimationId); meterAnimationId = null; }
+  meterEl.style.width = '0%';
+  micBtn.textContent = 'Start Listening';
+  micBtn.classList.remove('recording');
+  micStatus.textContent = 'Stopped.';
+  micStatus.className = 'status';
+}
+
+function recordChunk() {
+  if (!isRecording || !audioStream) return;
+  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus' : 'audio/webm';
+  const chunks = [];
+  try {
+    mediaRecorder = new MediaRecorder(audioStream, { mimeType: mime });
+  } catch (err) {
+    micStatus.textContent = 'MediaRecorder error: ' + err.message;
+    micStatus.className = 'status error';
+    return;
+  }
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    if (chunks.length > 0) {
+      const blob = new Blob(chunks, { type: mime });
+      if (blob.size > 1000) sendChunkToServer(blob, 'mic');
+    }
+    if (isRecording) recordChunk();
+  };
+  mediaRecorder.start();
+  setTimeout(() => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+  }, CHUNK_DURATION_MS);
+}
+
+function runMeter() {
+  if (!analyser) return;
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  function tick() {
+    if (!analyser) return;
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    meterEl.style.width = Math.min(100, rms * 200) + '%';
+    meterAnimationId = requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+// ── Shared ────────────────────────────────────────────────────────
+async function submitAndPoll(form) {
+  // form: a FormData with the audio file under key 'file'
+  const sub = await fetch(SERVER_URL + '/detect', { method: 'POST', headers: authHeaders(), body: form });
+  if (sub.status === 401) { throw new Error('Unauthorized — enter a valid API key'); }
+  if (sub.status !== 202) { throw new Error('Submit failed: HTTP ' + sub.status); }
+  const { job_id } = await sub.json();
+  for (let i = 0; i < 120; i++) {                     // poll up to ~2 min
+    await new Promise(r => setTimeout(r, 1000));
+    const jr = await fetch(SERVER_URL + '/jobs/' + job_id, { headers: authHeaders() });
+    if (!jr.ok) { throw new Error('Poll failed: HTTP ' + jr.status); }
+    const job = await jr.json();
+    if (job.status === 'done')  { return job.result; }
+    if (job.status === 'error') { throw new Error('Detection error: ' + (job.error || 'unknown')); }
+  }
+  throw new Error('Timed out waiting for result');
+}
+
+async function sendChunkToServer(blob, mode) {
+  if (mode === 'file') fileInflight++; else micInflight++;
+  updateInflightStatus(mode);
+  // Preserve the original filename (and thus extension) for a raw file upload; the mic
+  // path streams webm chunks with a synthetic name.
+  const filename = (mode === 'file' && blob.name)
+    ? blob.name
+    : `chunk_${Date.now()}.${mode === 'file' ? 'wav' : 'webm'}`;
+  const fd = new FormData();
+  fd.append('file', blob, filename);
+  try {
+    const result = await submitAndPoll(fd);
+    updateUI(result, mode);
+    renderExplainability(result);
+  } catch (err) {
+    console.error('Send failed:', err);
+    const target = mode === 'file' ? fileStatus : micStatus;
+    target.textContent = err.message;
+    target.className = 'status error';
+  } finally {
+    if (mode === 'file') fileInflight--; else micInflight--;
+    updateInflightStatus(mode);
+  }
+}
+
+function updateInflightStatus(mode) {
+  if (mode === 'file') {
+    if (!isFilePlaying && fileInflight === 0) {
+      fileStatus.textContent = 'Finished. Analysis complete.';
+      fileStatus.className = 'status';
+      return;
+    }
+    fileStatus.textContent = fileInflight > 0
+      ? `Analyzing full audio…` : 'Streaming complete.';
+    fileStatus.className = 'status live';
+  } else {
+    if (!isRecording) return;
+    micStatus.textContent = micInflight > 0
+      ? `Listening · scoring ${micInflight} chunk${micInflight > 1 ? 's' : ''}…`
+      : 'Listening. Speak normally.';
+    micStatus.className = 'status live';
+  }
+}
+
+function verdictClass(v) { return (v || '').toLowerCase().replace(/[^a-z_]/g, ''); }
+
+function updateUI(r, mode) {
+  const v = r.verdict || 'UNKNOWN';
+  const cls = verdictClass(v);
+  verdictCard.className = 'verdict-card ' + cls;
+  verdictValue.textContent = v.replace(/_/g, ' ');
+  verdictScore.textContent = `score: ${r.pct ?? '–'}%  ·  ${r.duration ?? '–'}s  ·  ${r.policy || 'standard'}`;
+  // Stage-1 screener always runs; ensemble models run only on escalated chunks
+  // (null when every chunk resolved at stage 1).
+  setComp(lcnnValue,   lcnnBar,   r.lcnn);
+  setComp(aasistValue, aasistBar, r.aasist);
+  setComp(w2vValue,    w2vBar,    r.w2v);
+  setComp(rawnetValue, rawnetBar, r.rawnet);
+
+  // ── Cascade routing panel ──
+  renderCascade(r.cascade, r.lcnn, r.chunks);
+
+  // Explain null ensemble scores when nothing escalated
+  const s2 = r.cascade ? (r.cascade.stage2_chunks || 0) : null;
+  if (s2 === 0) {
+    compNote.style.display = 'block';
+    compNote.textContent = 'The ensemble models did not run: the fast LCNN screener '
+      + 'resolved every chunk on its own, so no chunk needed the full ensemble.';
+  } else if (s2 !== null) {
+    compNote.style.display = 'block';
+    compNote.textContent = `Ensemble scores are averaged over the ${s2} chunk`
+      + (s2 === 1 ? '' : 's') + ' the screener escalated; the rest resolved at stage 1.';
+  } else {
+    compNote.style.display = 'none';
+  }
+
+  // ── Watermark panel ──
+  renderWatermark(r.watermark);
+  renderMetadata(r.metadata);
+  renderC2PA(r.c2pa);
+
+  // ── Segment timeline ──
+  if (r.segments && r.segments.length > 1) {
+    renderTimeline(r.segments, r.flagged_segments || [], r.duration || 0);
+    timelinePanel.classList.add('show');
+  } else {
+    timelinePanel.classList.remove('show');
+  }
+
+  // ── Explanations ──
+  if (r.explanation && r.explanation.observations) {
+    explainPanel.classList.add('show');
+    explainSummary.textContent = r.explanation.summary || '';
+    obsList.innerHTML = '';
+    for (const o of r.explanation.observations) {
+      const div = document.createElement('div');
+      div.className = 'obs ' + o.lean;
+      const icon = o.lean === 'toward_fake' ? '⚠'
+                 : o.lean === 'toward_real' ? '✓' : '•';
+      div.innerHTML = `
+        <div class="obs-icon">${icon}</div>
+        <div class="obs-content">
+          <div class="obs-title">${escapeHtml(o.title)}</div>
+          <div class="obs-detail">${escapeHtml(o.detail)}</div>
+        </div>`;
+      obsList.appendChild(div);
+    }
+    measurementsEl.innerHTML = '';
+
+    // Append microphone signature findings if available
+    if (r.mic_signature && r.mic_signature.available && r.mic_signature.findings.length > 0) {
+      // Section header
+      const header = document.createElement('div');
+      header.style.cssText = 'font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 16px; margin-bottom: 8px; padding-top: 12px; border-top: 1px solid var(--border);';
+      header.textContent = 'Microphone signature analysis';
+      obsList.appendChild(header);
+
+      // Findings
+      for (const f of r.mic_signature.findings) {
+        const div = document.createElement('div');
+        div.className = 'obs ' + f.lean;
+        const icon = f.lean === 'toward_fake' ? '⚠'
+                   : f.lean === 'toward_real' ? '✓' : '•';
+        div.innerHTML = `
+          <div class="obs-icon">${icon}</div>
+          <div class="obs-content">
+            <div class="obs-title">${escapeHtml(f.title)}</div>
+            <div class="obs-detail">${escapeHtml(f.detail)}</div>
+          </div>`;
+        obsList.appendChild(div);
+      }
+
+      // Caveat
+      if (r.mic_signature.caveat) {
+        const caveat = document.createElement('div');
+        caveat.style.cssText = 'font-size: 12px; color: var(--text-dim); font-style: italic; margin-top: 10px; padding: 8px 12px; background: var(--panel); border-radius: 5px; border-left: 2px solid var(--border);';
+        caveat.textContent = r.mic_signature.caveat;
+        obsList.appendChild(caveat);
+      }
+    }
+    for (const [k, val] of Object.entries(r.explanation.measurements || {})) {
+      const row = document.createElement('div');
+      row.className = 'm-row';
+      row.innerHTML = `<span class="m-key">${k}</span><span class="m-val">${val}</span>`;
+      measurementsEl.appendChild(row);
+    }
+
+    // Mic-signature raw measurements (appended to the technical panel)
+    if (r.mic_signature && r.mic_signature.available && r.mic_signature.measurements) {
+      for (const [k, val] of Object.entries(r.mic_signature.measurements)) {
+        if (val === null) continue;
+        const row = document.createElement('div');
+        row.className = 'm-row';
+        row.innerHTML = `<span class="m-key">mic.${k}</span><span class="m-val">${val}</span>`;
+        measurementsEl.appendChild(row);
+      }
+    }
+  } else {
+    explainPanel.classList.remove('show');
+  }
+
+  addHistoryRow(v, r, mode);
+}
+
+function setComp(valueEl, barEl, pct) {
+  // pct is a number (0-100) or null/undefined when the model didn't run.
+  if (pct === null || pct === undefined) {
+    valueEl.textContent = '—';
+    valueEl.classList.add('dim');
+    barEl.style.width = '0%';
+  } else {
+    valueEl.textContent = pct + '%';
+    valueEl.classList.remove('dim');
+    barEl.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  }
+}
+
+function renderCascade(c, lcnnMean, nChunks) {
+  if (!c) { cascadePanel.classList.remove('show'); return; }
+  cascadePanel.classList.add('show');
+  const s1 = c.stage1_chunks || 0;
+  const s2 = c.stage2_chunks || 0;
+  const total = (s1 + s2) || nChunks || 1;
+  const res = c.resolution_pct !== undefined ? c.resolution_pct : (100 * s1 / total);
+  const band = c.band || [0.20, 0.80];
+
+  cascadeSub.textContent =
+    `A lightweight LCNN screener scores each 4-second chunk first. Chunks it is confident about `
+    + `(p ≤ ${band[0]} or p ≥ ${band[1]}) are resolved immediately; only uncertain chunks escalate `
+    + `to the full 3-model ensemble. ${res.toFixed(0)}% resolved at stage 1 here.`;
+
+  // Proportional bar
+  cascadeBar.innerHTML = '';
+  const mk = (cls, grow, label) => {
+    if (grow <= 0) return;
+    const d = document.createElement('div');
+    d.className = 'cascade-seg ' + cls;
+    d.style.flexGrow = String(grow);
+    d.textContent = grow / total >= 0.12 ? label : '';
+    cascadeBar.appendChild(d);
+  };
+  mk('stage1', s1, `${s1} screened`);
+  mk('stage2', s2, `${s2} escalated`);
+
+  cascadeS1.textContent = `${s1} / ${total} chunk${total === 1 ? '' : 's'} (${res.toFixed(0)}%)`;
+  cascadeS2.textContent = `${s2} chunk${s2 === 1 ? '' : 's'}`;
+  cascadeLcnn.textContent = (lcnnMean === null || lcnnMean === undefined) ? '—' : lcnnMean + '%';
+}
+
+function renderWatermark(wm) {
+  if (!wm) {
+    watermarkPanel.classList.remove('show', 'detected', 'not_detected');
+    return;
+  }
+  watermarkPanel.classList.add('show');
+  watermarkSegments.innerHTML = '';
+
+  if (!wm.available) {
+    watermarkPanel.classList.remove('detected');
+    watermarkPanel.classList.add('not_detected');
+    watermarkIcon.textContent = '◌';
+    watermarkTitle.textContent = 'Watermark check — unavailable';
+    watermarkDetail.textContent = wm.message || 'AudioSeal detection is not configured.';
+    return;
+  }
+
+  if (wm.detected) {
+    watermarkPanel.classList.add('detected');
+    watermarkPanel.classList.remove('not_detected');
+    watermarkIcon.textContent = '🔐';
+    watermarkTitle.textContent = `AudioSeal watermark detected (${Math.round((wm.confidence || 0) * 100)}% confidence)`;
+    watermarkDetail.textContent = wm.message;
+    if (wm.localized_segments && wm.localized_segments.length > 0) {
+      for (const seg of wm.localized_segments) {
+        const span = document.createElement('span');
+        span.className = 'watermark-seg-row';
+        span.textContent = `${seg.start_sec}s – ${seg.end_sec}s (${Math.round(seg.confidence * 100)}%)`;
+        watermarkSegments.appendChild(span);
+      }
+    }
+  } else {
+    watermarkPanel.classList.remove('detected');
+    watermarkPanel.classList.add('not_detected');
+    watermarkIcon.textContent = '◌';
+    watermarkTitle.textContent = 'No AudioSeal watermark detected';
+    watermarkDetail.textContent = wm.message;
+  }
+}
+
+function renderTimeline(segments, flagged, totalDuration) {
+  timelineEl.innerHTML = '';
+  const total = totalDuration || segments.reduce((s, x) => s + (x.end_sec - x.start_sec), 0);
+  if (total <= 0) return;
+  for (const seg of segments) {
+    const dur = seg.end_sec - seg.start_sec;
+    const block = document.createElement('div');
+    block.className = 'timeline-segment ' + verdictClass(seg.verdict);
+    block.style.flexGrow = String(Math.max(0.1, dur));
+    block.title = `${seg.start_sec.toFixed(1)}s – ${seg.end_sec.toFixed(1)}s · ${seg.verdict} (${(seg.score * 100).toFixed(1)}%)`;
+    timelineEl.appendChild(block);
+  }
+  timelineAxis.innerHTML = `
+    <span>0:00</span>
+    <span>${formatTime(total / 2)}</span>
+    <span>${formatTime(total)}</span>`;
+  flaggedList.innerHTML = '';
+  if (flagged.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'flagged-list-empty';
+    empty.textContent = 'No suspicious segments — all of the audio reads as natural speech.';
+    flaggedList.appendChild(empty);
+  } else {
+    for (const seg of flagged) {
+      const row = document.createElement('div');
+      row.className = 'flagged-row ' + verdictClass(seg.verdict);
+      row.innerHTML = `
+        <span class="time-range">${formatTime(seg.start_sec)} – ${formatTime(seg.end_sec)}</span>
+        <span class="verdict">${seg.verdict.replace(/_/g, ' ')}</span>
+        <span class="seg-score">${(seg.score * 100).toFixed(1)}%</span>`;
+      flaggedList.appendChild(row);
+    }
+  }
+}
+
+function renderMetadata(md) {
+  const panel = document.getElementById('metadataPanel');
+  const title = document.getElementById('metadataTitle');
+  const summary = document.getElementById('metadataSummary');
+  const findingsDiv = document.getElementById('metadataFindings');
+
+  if (!md || !md.available) {
+    panel.classList.remove('show', 'toward_fake', 'toward_real');
+    return;
+  }
+
+  panel.classList.add('show');
+  panel.classList.remove('toward_fake', 'toward_real');
+  if (md.lean === 'toward_fake') panel.classList.add('toward_fake');
+  else if (md.lean === 'toward_real') panel.classList.add('toward_real');
+
+  title.textContent = 'File metadata analysis';
+  summary.textContent = md.summary || '';
+
+  findingsDiv.innerHTML = '';
+  if (md.findings && md.findings.length > 0) {
+    for (const f of md.findings) {
+      const div = document.createElement('div');
+      div.className = 'metadata-finding ' + (f.lean || 'neutral');
+      div.innerHTML = `
+        <div class="metadata-finding-title">${escapeHtml(f.title)}<span class="metadata-finding-conf">${escapeHtml(f.confidence || '')}</span></div>
+        <div class="metadata-finding-detail">${escapeHtml(f.description)}</div>
+      `;
+      findingsDiv.appendChild(div);
+    }
+  }
+}
+
+function renderC2PA(c) {
+  const panel = document.getElementById('c2paPanel');
+  const icon = document.getElementById('c2paIcon');
+  const title = document.getElementById('c2paTitle');
+  const detail = document.getElementById('c2paDetail');
+  const meta = document.getElementById('c2paMeta');
+
+  if (!c) {
+    panel.classList.remove('show', 'ai_declared', 'has_credentials');
+    return;
+  }
+
+  panel.classList.remove('ai_declared', 'has_credentials');
+  meta.innerHTML = '';
+
+  // Only show the panel if there's something meaningful to say
+  if (c.has_credentials) {
+    panel.classList.add('show');
+    if (c.is_ai_generated) {
+      panel.classList.add('ai_declared');
+      icon.textContent = '⚠';
+      title.textContent = 'C2PA credentials declare AI generation';
+    } else {
+      panel.classList.add('has_credentials');
+      icon.textContent = '📜';
+      title.textContent = 'C2PA content credentials present';
+    }
+    detail.textContent = c.message;
+
+    // Show key provenance info
+    const rows = [];
+    if (c.claim_generator) rows.push(['Generator', c.claim_generator]);
+    if (c.signature_issuer) rows.push(['Signed by', c.signature_issuer]);
+    if (c.creation_time) rows.push(['Created', c.creation_time]);
+    if (c.is_valid !== null) rows.push(['Signature valid', c.is_valid ? 'Yes' : 'Issues found']);
+
+    for (const [k, v] of rows) {
+      const r = document.createElement('div');
+      r.className = 'c2pa-meta-row';
+      r.innerHTML = `<span class="c2pa-meta-key">${k}:</span>${escapeHtml(String(v))}`;
+      meta.appendChild(r);
+    }
+  } else {
+    // No credentials. Hide the panel quietly — most files won't have C2PA,
+    // and we don't want to clutter the UI with "nothing found" messages.
+    panel.classList.remove('show');
+  }
+}
+
+function renderExplainability(r) {
+  document.getElementById('ex-confidence').textContent =
+    'Confidence: ' + (r.confidence != null ? (r.confidence * 100).toFixed(0) + '%' : 'n/a');
+
+  const img = document.getElementById('ex-heatmap');
+  if (r.heatmap && r.heatmap.png_base64) {
+    img.src = 'data:image/png;base64,' + r.heatmap.png_base64;
+    img.style.display = 'block';
+  } else { img.style.display = 'none'; }
+
+  const shapEl = document.getElementById('ex-shap');
+  if (r.shap) {
+    shapEl.innerHTML = '<b>Model contributions (SHAP):</b> ' +
+      ['aasist', 'wav2vec', 'rawnet'].map(k =>
+        `${k}: ${r.shap[k] >= 0 ? '+' : ''}${r.shap[k].toFixed(2)}`).join(' &nbsp; ');
+  } else { shapEl.textContent = 'SHAP: n/a (resolved at screener stage)'; }
+
+  const seg = (r.flagged_segments || [])
+    .map(s => `${s.start_sec.toFixed(1)}-${s.end_sec.toFixed(1)}s (${s.verdict})`).join(', ');
+  document.getElementById('ex-segments').innerHTML =
+    '<b>Flagged segments:</b> ' + (seg || 'none');
+
+  // Prosody observations are already rendered by updateUI() (obsList) with title/detail/lean;
+  // not duplicated here.
+
+  const advEl = document.getElementById('ex-adversarial');
+  if (r.adversarial) {
+    const a = r.adversarial;
+    const attack = a.flag === 'attack_suspected';
+    advEl.innerHTML = '<b>Adversarial attack risk:</b> '
+      + `<span style="color:${attack ? '#c0392b' : '#2e7d32'};font-weight:600">`
+      + `${attack ? '⚠ ATTACK SUSPECTED' : 'normal'}</span>`
+      + ` (confidence ${(a.confidence * 100).toFixed(0)}%, threshold ${(a.threshold * 100).toFixed(0)}%)`;
+  } else {
+    advEl.textContent = '';
+  }
+
+  const c2El = document.getElementById('ex-c2pa');
+  const cp = r.c2pa;
+  if (cp && cp.has_credentials) {
+    const color = cp.lean === 'toward_fake' ? '#c0392b'
+                : cp.lean === 'toward_real' ? '#2e7d32' : '#555';
+    c2El.innerHTML = '<b>Content Credentials (C2PA):</b> '
+      + `<span style="color:${color};font-weight:600">${cp.summary || ''}</span>`
+      + (cp.claim_generator ? ` <span style="color:#888">· ${cp.claim_generator}</span>` : '');
+  } else if (cp && cp.available) {
+    c2El.innerHTML = '<b>Content Credentials (C2PA):</b> <span style="color:#888">none embedded</span>';
+  } else {
+    c2El.textContent = '';
+  }
+
+  document.getElementById('ex-audit').textContent =
+    'audit_id: ' + (r.audit_id || '') + '   sha256(bytes server processed): ' + (r.sha256 || '');
+}
+
+function formatTime(sec) {
+  if (!isFinite(sec) || sec < 0) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = String(s ?? '');
+  return div.innerHTML;
+}
+
+function addHistoryRow(verdict, r, mode) {
+  if (historyEl.children.length === 1 && historyEl.children[0].tagName === 'DIV'
+      && historyEl.children[0].textContent && historyEl.children[0].textContent.includes('No detections yet')) {
+    historyEl.innerHTML = '';
+  }
+  const row = document.createElement('div');
+  row.className = 'row ' + verdictClass(verdict);
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const modeLabel = mode === 'file' ? '📁' : '🎤';
+  const segCount = r.segments ? r.segments.length : 0;
+  const segNote = segCount > 1 ? ` · ${segCount} segments` : '';
+  const casNote = r.cascade ? ` · ${(r.cascade.resolution_pct ?? 0).toFixed?.(0) ?? r.cascade.resolution_pct}% s1` : '';
+  const watermarkBadge = (r.watermark && r.watermark.detected)
+    ? '<span class="watermark-flag">🔐 WATERMARK</span>' : '';
+  row.innerHTML = `
+    <span class="time">${modeLabel} ${timeStr}</span>
+    <span class="verdict">${verdict.replace(/_/g, ' ')}${watermarkBadge}</span>
+    <span class="score">${r.pct ?? '–'}% · L:${r.lcnn ?? '–'} A:${r.aasist ?? '–'} W:${r.w2v ?? '–'} R:${r.rawnet ?? '–'}${casNote}${segNote}</span>`;
+  historyEl.insertBefore(row, historyEl.firstChild);
+  while (historyEl.children.length > MAX_HISTORY) {
+    historyEl.removeChild(historyEl.lastChild);
+  }
+}
+
+fetch(SERVER_URL + '/ping').then(r => r.json()).then(j => {
+  if (j.status === 'ready') {
+    const ver = j.version || 'V9';
+    const cas = j.cascade ? ' · cascade' : '';
+    fileStatus.textContent = `${ver} server ready${cas}. Select an audio file to begin.`;
+    micStatus.textContent  = `${ver} server ready. Click "Start Listening" to begin.`;
+  }
+}).catch(() => {
+  const msg = 'Cannot reach V9 server at ' + SERVER_URL + '. Is server.py running?';
+  fileStatus.textContent = msg;
+  fileStatus.className = 'status error';
+  micStatus.textContent = msg;
+  micStatus.className = 'status error';
+});
+</script>
+</body>
+</html>

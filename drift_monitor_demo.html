@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoiceGuard V8 — Drift Monitor</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:        #0a0d12;
+    --surface:   #111520;
+    --border:    #1e2535;
+    --border2:   #2a3348;
+    --text:      #c8d0e0;
+    --muted:     #4a5568;
+    --label:     #6b7a99;
+    --green:     #00e5a0;
+    --green-dim: #00a870;
+    --amber:     #f5a623;
+    --red:       #ff4757;
+    --blue:      #4fa3ff;
+    --purple:    #a78bfa;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 100;
+  }
+  .header-left { display: flex; align-items: center; gap: 14px; }
+  .logo-mark {
+    width: 32px; height: 32px;
+    background: var(--green);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--bg);
+    letter-spacing: -0.5px;
+  }
+  .product-name {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+    letter-spacing: 0.05em;
+  }
+  .product-name span { color: var(--green); }
+  .header-status {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--label);
+  }
+  .pulse {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ── Layout ── */
+  .main { padding: 28px 32px; max-width: 1300px; }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  /* ── Control bar ── */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 8px 16px;
+    border-radius: 5px;
+    border: 1px solid var(--border2);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.02em;
+  }
+  .btn:hover { border-color: var(--green); color: var(--green); }
+  .btn.primary {
+    background: var(--green);
+    color: var(--bg);
+    border-color: var(--green);
+    font-weight: 600;
+  }
+  .btn.primary:hover { background: var(--green-dim); border-color: var(--green-dim); color: #fff; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.danger { border-color: var(--red); color: var(--red); }
+  .controls-right { margin-left: auto; display: flex; gap: 10px; }
+  .mode-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    color: var(--label);
+  }
+
+  /* ── Metric cards ── */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--border2);
+    transition: background 0.3s;
+  }
+  .card.ok::before  { background: var(--green); }
+  .card.warn::before { background: var(--amber); }
+  .card.alert::before { background: var(--red); }
+  .card-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+  }
+  .card-value {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+    margin-bottom: 6px;
+    transition: color 0.3s;
+  }
+  .card.alert .card-value { color: var(--red); }
+  .card.warn .card-value  { color: var(--amber); }
+  .card.ok .card-value    { color: var(--green); }
+  .card-sub {
+    font-size: 11px;
+    color: var(--label);
+    font-family: var(--mono);
+  }
+  .card-delta {
+    position: absolute;
+    top: 16px; right: 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 3px;
+  }
+  .delta-up   { background: rgba(255,71,87,0.15);  color: var(--red); }
+  .delta-down { background: rgba(0,229,160,0.12);  color: var(--green); }
+  .delta-flat { background: rgba(107,122,153,0.15); color: var(--label); }
+
+  /* ── Two-column bottom ── */
+  .bottom-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  /* ── Panel ── */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--label);
+  }
+  .panel-body { padding: 16px 18px; }
+
+  /* ── EER Trend chart ── */
+  .chart-wrap { position: relative; height: 160px; }
+  canvas { display: block; }
+
+  /* ── Source table ── */
+  .source-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  .source-table th {
+    text-align: left; color: var(--muted); font-weight: 500;
+    padding: 6px 8px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  .source-table td { padding: 8px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .source-table tr:last-child td { border-bottom: none; }
+  .source-label { color: var(--text); }
+  .bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .bar-track {
+    flex: 1; height: 5px; background: var(--border2); border-radius: 3px; overflow: hidden;
+  }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+  .bar-val { min-width: 38px; text-align: right; }
+
+  /* ── Alert feed ── */
+  .alert-feed { display: flex; flex-direction: column; gap: 8px; min-height: 100px; }
+  .alert-item {
+    padding: 10px 14px;
+    border-radius: 6px;
+    border: 1px solid;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.5;
+    opacity: 0;
+    transform: translateX(-8px);
+    animation: slideIn 0.3s forwards;
+  }
+  @keyframes slideIn {
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .alert-confirmed {
+    background: rgba(255,71,87,0.08);
+    border-color: rgba(255,71,87,0.35);
+    color: var(--red);
+  }
+  .alert-pending {
+    background: rgba(245,166,35,0.08);
+    border-color: rgba(245,166,35,0.3);
+    color: var(--amber);
+  }
+  .alert-ok {
+    background: rgba(0,229,160,0.06);
+    border-color: rgba(0,229,160,0.25);
+    color: var(--green);
+  }
+  .alert-info {
+    background: rgba(79,163,255,0.07);
+    border-color: rgba(79,163,255,0.25);
+    color: var(--blue);
+  }
+  .alert-tag {
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 6px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
+
+  /* ── Log terminal ── */
+  .terminal {
+    background: #070a0f;
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.8;
+    max-height: 220px;
+    overflow-y: auto;
+    color: var(--label);
+  }
+  .terminal::-webkit-scrollbar { width: 4px; }
+  .terminal::-webkit-scrollbar-track { background: transparent; }
+  .terminal::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+  .log-ts { color: var(--muted); }
+  .log-info  { color: var(--green); }
+  .log-warn  { color: var(--amber); }
+  .log-error { color: var(--red); }
+  .log-dim   { color: var(--muted); }
+
+  /* ── Component EER ── */
+  .comp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .comp-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .comp-name { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.1em; }
+  .comp-val  { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--text); }
+
+  /* ── Run history strip ── */
+  .history-strip {
+    display: flex;
+    gap: 4px;
+    align-items: flex-end;
+    height: 36px;
+  }
+  .history-bar {
+    flex: 1;
+    border-radius: 2px 2px 0 0;
+    min-height: 4px;
+    transition: all 0.3s;
+    cursor: pointer;
+    position: relative;
+  }
+  .history-bar:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-size: 10px;
+    padding: 3px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+    z-index: 10;
+    font-family: var(--mono);
+  }
+
+  /* ── Progress / spinner ── */
+  .spinner {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid var(--border2);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .run-progress {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--label);
+    padding: 8px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .run-progress.visible { display: flex; }
+
+  /* ── P-value badge ── */
+  .sig { color: var(--green); font-size: 10px; }
+  .insig { color: var(--muted); font-size: 10px; }
+
+  /* ── Email status ── */
+  .email-status {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 11px; color: var(--label);
+    padding: 8px 14px;
+    background: rgba(0,229,160,0.05);
+    border: 1px solid rgba(0,229,160,0.15);
+    border-radius: 6px;
+    margin-top: 10px;
+  }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <div class="logo-mark">V8</div>
+    <div class="product-name">VoiceGuard <span>Drift Monitor</span></div>
+  </div>
+  <div class="header-status">
+    <div class="pulse" id="statusPulse"></div>
+    <span id="statusText">Idle — ready to run</span>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn primary" id="btnRun" onclick="runMonitor(false)">▶ Run Full Evaluation</button>
+    <button class="btn" id="btnQuick" onclick="runMonitor(true)">⚡ Quick Run</button>
+    <button class="btn" onclick="simulateDrift()">⚠ Simulate Drift</button>
+    <button class="btn" onclick="resetBaseline()">↺ Reset Baseline</button>
+    <div class="controls-right">
+      <div class="run-progress" id="runProgress">
+        <span class="spinner"></span>
+        <span id="progressText">Loading V8 models…</span>
+      </div>
+      <div class="mode-tag" id="modeTag">NO BASELINE</div>
+    </div>
+  </div>
+
+  <!-- KPI cards -->
+  <div class="section-label">Live Metrics</div>
+  <div class="cards">
+    <div class="card ok" id="card-eer">
+      <div class="card-label">Ensemble EER</div>
+      <div class="card-value" id="val-eer">—</div>
+      <div class="card-sub" id="sub-eer">awaiting first run</div>
+      <div class="card-delta" id="delta-eer" style="display:none"></div>
+    </div>
+    <div class="card ok" id="card-noizai">
+      <div class="card-label">Noiz.ai Catch Rate</div>
+      <div class="card-value" id="val-noizai">—</div>
+      <div class="card-sub" id="sub-noizai">awaiting first run</div>
+      <div class="card-delta" id="delta-noizai" style="display:none"></div>
+    </div>
+    <div class="card ok" id="card-runs">
+      <div class="card-label">Runs Since Baseline</div>
+      <div class="card-value" id="val-runs">0</div>
+      <div class="card-sub" id="sub-runs">baseline not set</div>
+    </div>
+    <div class="card ok" id="card-alerts">
+      <div class="card-label">Active Alerts</div>
+      <div class="card-value" id="val-alerts">0</div>
+      <div class="card-sub" id="sub-alerts">all clear</div>
+    </div>
+  </div>
+
+  <!-- EER trend + Source breakdown -->
+  <div class="bottom-grid">
+
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">EER Trend</span>
+        <div class="history-strip" id="historyStrip"></div>
+      </div>
+      <div class="panel-body">
+        <div class="chart-wrap">
+          <canvas id="trendChart" width="580" height="155"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Per-Source Performance</span>
+      </div>
+      <div class="panel-body">
+        <table class="source-table" id="sourceTable">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Type</th>
+              <th style="width:180px">Rate</th>
+              <th>N</th>
+            </tr>
+          </thead>
+          <tbody id="sourceBody">
+            <tr><td colspan="4" style="color:var(--muted);font-family:var(--mono);font-size:11px;padding:20px 8px">Run an evaluation to see per-source breakdown.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Component EERs + Alert feed -->
+  <div class="bottom-grid">
+
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Component EERs</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Localise which sub-model is drifting</span>
+      </div>
+      <div class="panel-body">
+        <div class="comp-grid" id="compGrid">
+          <div class="comp-card"><div class="comp-name">AASIST</div><div class="comp-val" id="comp-aasist">—</div></div>
+          <div class="comp-card"><div class="comp-name">Wav2Vec</div><div class="comp-val" id="comp-wav2vec">—</div></div>
+          <div class="comp-card"><div class="comp-name">RawNet3</div><div class="comp-val" id="comp-rawnet">—</div></div>
+        </div>
+        <div style="margin-top:16px">
+          <div class="section-label" style="margin-bottom:8px">Confirmation State</div>
+          <div id="confirmState" style="font-family:var(--mono);font-size:11px;color:var(--muted)">No active breach counters.</div>
+        </div>
+        <div class="email-status" id="emailStatus" style="display:none">
+          <span>📧</span>
+          <span id="emailStatusText"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Alert Feed</span>
+        <span id="alertCount" style="font-family:var(--mono);font-size:10px;color:var(--muted)">0 alerts</span>
+      </div>
+      <div class="panel-body">
+        <div class="alert-feed" id="alertFeed">
+          <div class="alert-item alert-ok" style="opacity:1;transform:none">
+            <span class="alert-tag" style="background:rgba(0,229,160,0.15);color:var(--green)">OK</span>
+            System ready. Run an evaluation to begin monitoring.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terminal log -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Run Log</span>
+      <button class="btn" style="font-size:10px;padding:4px 10px" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="panel-body" style="padding:0">
+      <div class="terminal" id="terminal"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────
+const state = {
+  baseline: null,
+  runs: [],
+  runCount: 0,
+  alertState: {},   // confirmation counters
+  driftMode: false,
+  running: false,
+};
+
+const CONFIRM_RUNS = 2;
+const THRESHOLDS = {
+  eer: 0.03,          // 3pp
+  source: 0.10,       // 10pp
+  noizai: 0.15,       // 15pp
+};
+
+// ── Fake data generator ───────────────────────────────────────────────────
+function fakeSources(driftMode) {
+  const sources = [
+    { name: 'elevenlabs_v2',   label: 1 },
+    { name: 'tortoisetts',     label: 1 },
+    { name: 'bark',            label: 1 },
+    { name: 'phone_recorded',  label: 1 },
+    { name: 'vctk_real',       label: 0 },
+    { name: 'librispeech',     label: 0 },
+  ];
+  return sources.map(s => {
+    let rate;
+    if (driftMode && (s.name === 'elevenlabs_v2' || s.name === 'phone_recorded')) {
+      rate = 0.45 + Math.random() * 0.15;  // dropped badly
+    } else if (s.label === 1) {
+      rate = 0.82 + Math.random() * 0.10;
+    } else {
+      rate = 0.04 + Math.random() * 0.06;  // false positive rate
+    }
+    return { ...s, rate, n: Math.floor(20 + Math.random() * 30) };
+  });
+}
+
+function fakeRun(driftMode) {
+  const eer       = driftMode ? 0.091 + Math.random() * 0.04 : 0.048 + Math.random() * 0.018;
+  const noizai    = driftMode ? 0.62  + Math.random() * 0.08 : 0.88  + Math.random() * 0.06;
+  const aasist    = eer + (Math.random() - 0.5) * 0.015;
+  const wav2vec   = eer + (Math.random() - 0.5) * 0.02;
+  const rawnet    = eer + (Math.random() - 0.5) * 0.018;
+  const n_samples = driftMode ? 180 : 200;
+  return {
+    timestamp:   new Date().toISOString(),
+    mode:        driftMode ? 'full' : 'full',
+    eer:         +eer.toFixed(4),
+    noizai:      +noizai.toFixed(3),
+    sources:     fakeSources(driftMode),
+    components:  { aasist: +aasist.toFixed(4), wav2vec: +wav2vec.toFixed(4), rawnet: +rawnet.toFixed(4) },
+    n_samples,
+    n_skipped:   driftMode ? 4 : 0,
+    p_value:     driftMode ? (0.01 + Math.random() * 0.03).toFixed(3) : (0.15 + Math.random() * 0.3).toFixed(3),
+  };
+}
+
+// ── Alert detection ────────────────────────────────────────────────────────
+function detectAlerts(run, baseline) {
+  if (!baseline) return [];
+  const alerts = [];
+
+  const eerDelta = (run.eer - baseline.eer) * 100;
+  if (Math.abs(eerDelta) > THRESHOLDS.eer * 100) {
+    const sig = parseFloat(run.p_value) < 0.05;
+    alerts.push({
+      key: 'clean_ensemble_eer',
+      type: eerDelta > 0 ? 'warn' : 'info',
+      text: `Ensemble EER ${eerDelta > 0 ? '↑' : '↓'} ${Math.abs(eerDelta).toFixed(1)}pp `
+           + `(${baseline.eer.toFixed(4)} → ${run.eer.toFixed(4)}, p=${run.p_value}`
+           + `${sig ? ' ✓ significant' : ' — may be noise'})`,
+      significant: sig,
+    });
+  }
+
+  const noizaiDelta = (run.noizai - baseline.noizai) * 100;
+  if (-noizaiDelta > THRESHOLDS.noizai * 100) {
+    alerts.push({
+      key: 'noizai_catch_rate',
+      type: 'warn',
+      text: `Noiz.ai catch rate dropped ${Math.abs(noizaiDelta).toFixed(1)}pp `
+           + `(${(baseline.noizai*100).toFixed(1)}% → ${(run.noizai*100).toFixed(1)}%)`,
+      significant: true,
+    });
+  }
+
+  for (const src of run.sources) {
+    if (src.label !== 1) continue;
+    const bSrc = baseline.sources.find(s => s.name === src.name);
+    if (!bSrc) continue;
+    const delta = (src.rate - bSrc.rate) * 100;
+    const thresh = src.name.includes('phone') ? THRESHOLDS.noizai * 100 : THRESHOLDS.source * 100;
+    if (-delta > thresh) {
+      alerts.push({
+        key: `source_${src.name}`,
+        type: 'warn',
+        text: `Catch rate drop — ${src.name}: ${(bSrc.rate*100).toFixed(1)}% → ${(src.rate*100).toFixed(1)}% (${delta.toFixed(1)}pp)`,
+        significant: true,
+      });
+    }
+  }
+  return alerts;
+}
+
+function updateConfirmState(alerts) {
+  const triggered = new Set(alerts.filter(a => a.significant).map(a => a.key));
+  const allKeys   = ['clean_ensemble_eer','noizai_catch_rate',
+    ...state.runs.length ? state.runs[state.runs.length-1].sources.map(s=>`source_${s.name}`) : []
+  ];
+  for (const k of allKeys) {
+    state.alertState[k] = triggered.has(k) ? (state.alertState[k] || 0) + 1 : 0;
+  }
+  return alerts.filter(a => (state.alertState[a.key] || 0) >= CONFIRM_RUNS);
+}
+
+// ── Run simulation ─────────────────────────────────────────────────────────
+const runSteps = [
+  [600,  'Loading V8 models (AASIST + Wav2Vec + RawNet3 + XGB)…'],
+  [800,  'Validating val manifest schema…'],
+  [500,  'Running clean evaluation ({n} samples)…'],
+  [1200, 'Scoring audio files through ensemble…'],
+  [400,  'Computing EER + per-source breakdown…'],
+  [600,  'Running Noiz.ai evaluation…'],
+  [300,  'Checking drift vs baseline…'],
+  [200,  'Updating confirmation state…'],
+  [150,  'Saving report + rolling log…'],
+];
+
+async function runMonitor(quick) {
+  if (state.running) return;
+  state.running = true;
+  state.driftMode = false;
+  await _doRun(quick, false);
+}
+
+async function simulateDrift() {
+  if (state.running) return;
+  if (!state.baseline) {
+    addLog('warn', 'Set a baseline first before simulating drift.');
+    return;
+  }
+  state.running = true;
+  state.driftMode = true;
+  addLog('warn', 'Injecting synthetic drift into next run…');
+  await _doRun(false, true);
+}
+
+async function _doRun(quick, drift) {
+  setRunning(true);
+  const n = quick ? 60 : 200;
+  const steps = runSteps.map(([ms, txt]) => [ms, txt.replace('{n}', n)]);
+
+  for (const [ms, txt] of steps) {
+    setProgress(txt);
+    addLog('info', txt);
+    await sleep(ms * (quick ? 0.5 : 1));
+  }
+
+  const run = fakeRun(drift);
+  state.runs.push(run);
+  state.runCount++;
+
+  if (!state.baseline) {
+    state.baseline = run;
+    addLog('info', `Baseline set: EER=${run.eer.toFixed(4)}, Noiz.ai=${(run.noizai*100).toFixed(1)}%`);
+    setMode('BASELINE SET');
+  }
+
+  const alerts    = detectAlerts(run, state.baseline);
+  const confirmed = updateConfirmState(alerts);
+
+  updateCards(run, alerts, confirmed);
+  updateSources(run.sources, state.baseline.sources);
+  updateComponents(run.components);
+  updateTrend();
+  updateAlertFeed(alerts, confirmed);
+  updateConfirmDisplay(confirmed);
+
+  if (confirmed.length > 0) {
+    addLog('error', `${confirmed.length} CONFIRMED drift alert(s). Email notification sent.`);
+    showEmailStatus(confirmed.length);
+  } else if (alerts.length > 0) {
+    addLog('warn', `${alerts.length} pending alert(s) — need ${CONFIRM_RUNS} consecutive runs to confirm.`);
+  } else {
+    addLog('info', 'Run complete. No drift detected. All metrics within tolerance.');
+  }
+  addLog('dim', `Report saved → output/drift_report_${run.timestamp.slice(0,19).replace(/[:-]/g,'')}.json`);
+
+  setRunning(false);
+  state.running = false;
+}
+
+// ── UI updaters ────────────────────────────────────────────────────────────
+function updateCards(run, alerts, confirmed) {
+  // EER card
+  const eerDelta = state.baseline ? (run.eer - state.baseline.eer) * 100 : null;
+  const eerStatus = confirmed.some(a => a.key === 'clean_ensemble_eer') ? 'alert'
+                  : alerts.some(a => a.key === 'clean_ensemble_eer')    ? 'warn' : 'ok';
+  setCard('eer', run.eer.toFixed(4), `N=${run.n_samples} (skipped: ${run.n_skipped})`,
+          eerDelta != null ? `${eerDelta > 0 ? '+' : ''}${eerDelta.toFixed(1)}pp` : null,
+          eerDelta > 0 ? 'up' : eerDelta < 0 ? 'down' : 'flat', eerStatus);
+
+  // Noiz.ai card
+  const noizDelta = state.baseline ? (run.noizai - state.baseline.noizai) * 100 : null;
+  const noizStatus = confirmed.some(a => a.key === 'noizai_catch_rate') ? 'alert'
+                   : alerts.some(a => a.key === 'noizai_catch_rate')    ? 'warn' : 'ok';
+  setCard('noizai', `${(run.noizai * 100).toFixed(1)}%`, `fake audio detection rate`,
+          noizDelta != null ? `${noizDelta > 0 ? '+' : ''}${noizDelta.toFixed(1)}pp` : null,
+          noizDelta >= 0 ? 'down' : 'up', noizStatus);
+
+  // Runs card
+  el('val-runs').textContent = state.runCount;
+  el('sub-runs').textContent = state.baseline ? `baseline: EER ${state.baseline.eer.toFixed(4)}` : 'no baseline';
+  el('card-runs').className = `card ${state.runCount > 0 ? 'ok' : ''}`;
+
+  // Alerts card
+  const nc = confirmed.length;
+  const na = alerts.length;
+  el('val-alerts').textContent = na;
+  el('sub-alerts').textContent = nc > 0 ? `${nc} confirmed` : na > 0 ? `${na} pending` : 'all clear';
+  el('card-alerts').className = `card ${nc > 0 ? 'alert' : na > 0 ? 'warn' : 'ok'}`;
+  el('val-alerts').style.color = nc > 0 ? 'var(--red)' : na > 0 ? 'var(--amber)' : 'var(--green)';
+}
+
+function setCard(id, value, sub, delta, dir, status) {
+  el(`val-${id}`).textContent  = value;
+  el(`sub-${id}`).textContent  = sub;
+  el(`card-${id}`).className   = `card ${status}`;
+  const dEl = el(`delta-${id}`);
+  if (delta) {
+    dEl.textContent = delta;
+    dEl.className   = `card-delta delta-${dir}`;
+    dEl.style.display = '';
+  } else {
+    dEl.style.display = 'none';
+  }
+}
+
+function updateSources(sources, baseSources) {
+  const tbody = el('sourceBody');
+  tbody.innerHTML = '';
+  for (const src of sources) {
+    const bSrc  = baseSources && baseSources.find(s => s.name === src.name);
+    const isFake = src.label === 1;
+    const rate   = src.rate;
+    const barColor = isFake
+      ? (rate > 0.8 ? 'var(--green)' : rate > 0.6 ? 'var(--amber)' : 'var(--red)')
+      : (rate < 0.1 ? 'var(--green)' : 'var(--amber)');
+    const pct    = isFake ? rate : rate;  // both 0-1
+    const label  = isFake ? 'fake' : 'real';
+    const metric = isFake ? 'catch' : 'fp';
+
+    let deltaHtml = '';
+    if (bSrc) {
+      const d = (rate - bSrc.rate) * 100;
+      const col = (isFake ? d < -5 : d > 5) ? 'var(--red)' : (Math.abs(d) < 2 ? 'var(--muted)' : 'var(--amber)');
+      deltaHtml = `<span style="color:${col};font-size:10px;margin-left:4px">${d > 0 ? '+' : ''}${d.toFixed(1)}pp</span>`;
+    }
+
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr>
+        <td class="source-label">${src.name}</td>
+        <td><span style="font-size:10px;color:${isFake ? 'var(--red)' : 'var(--green)'}">${label}</span></td>
+        <td>
+          <div class="bar-wrap">
+            <div class="bar-track"><div class="bar-fill" style="width:${(pct*100).toFixed(1)}%;background:${barColor}"></div></div>
+            <span class="bar-val" style="color:${barColor}">${(pct*100).toFixed(1)}%</span>
+            ${deltaHtml}
+          </div>
+        </td>
+        <td style="color:var(--muted)">${src.n}</td>
+      </tr>
+    `);
+  }
+}
+
+function updateComponents(comp) {
+  el('comp-aasist').textContent  = comp.aasist.toFixed(4);
+  el('comp-wav2vec').textContent = comp.wav2vec.toFixed(4);
+  el('comp-rawnet').textContent  = comp.rawnet.toFixed(4);
+}
+
+function updateTrend() {
+  const canvas = el('trendChart');
+  const ctx    = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const runs   = state.runs;
+  const eers   = runs.map(r => r.eer);
+  const minEER = Math.min(...eers, state.baseline?.eer ?? 0.02) * 0.85;
+  const maxEER = Math.max(...eers, state.baseline?.eer ?? 0.12) * 1.15;
+  const pad    = { l: 44, r: 16, t: 14, b: 28 };
+  const W2 = W - pad.l - pad.r;
+  const H2 = H - pad.t - pad.b;
+
+  const toX = i => pad.l + (i / Math.max(eers.length - 1, 1)) * W2;
+  const toY = v => pad.t + H2 - ((v - minEER) / (maxEER - minEER)) * H2;
+
+  // Grid lines
+  ctx.strokeStyle = '#1e2535'; ctx.lineWidth = 1;
+  for (let i = 0; i < 4; i++) {
+    const y = pad.t + (i / 3) * H2;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    const v = maxEER - (i / 3) * (maxEER - minEER);
+    ctx.fillStyle = '#4a5568'; ctx.font = '10px IBM Plex Mono'; ctx.textAlign = 'right';
+    ctx.fillText(v.toFixed(3), pad.l - 5, y + 4);
+  }
+
+  // Baseline reference line
+  if (state.baseline) {
+    const by = toY(state.baseline.eer);
+    ctx.strokeStyle = 'rgba(79,163,255,0.4)'; ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(pad.l, by); ctx.lineTo(W - pad.r, by); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(79,163,255,0.7)'; ctx.font = '9px IBM Plex Mono'; ctx.textAlign = 'left';
+    ctx.fillText('baseline', pad.l + 4, by - 4);
+  }
+
+  if (eers.length < 2) {
+    // Single point
+    if (eers.length === 1) {
+      const x = toX(0), y = toY(eers[0]);
+      ctx.fillStyle = 'var(--green, #00e5a0)';
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    return;
+  }
+
+  // Area fill
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(eers[0]));
+  for (let i = 1; i < eers.length; i++) ctx.lineTo(toX(i), toY(eers[i]));
+  ctx.lineTo(toX(eers.length - 1), H - pad.b);
+  ctx.lineTo(toX(0), H - pad.b);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, pad.t, 0, H - pad.b);
+  grad.addColorStop(0, 'rgba(0,229,160,0.18)');
+  grad.addColorStop(1, 'rgba(0,229,160,0.01)');
+  ctx.fillStyle = grad; ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(eers[0]));
+  for (let i = 1; i < eers.length; i++) ctx.lineTo(toX(i), toY(eers[i]));
+  ctx.strokeStyle = '#00e5a0'; ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Dots — colour by drift
+  for (let i = 0; i < eers.length; i++) {
+    const x = toX(i), y = toY(eers[i]);
+    const drifted = state.baseline && (eers[i] - state.baseline.eer) * 100 > 3;
+    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = drifted ? '#ff4757' : '#00e5a0'; ctx.fill();
+    ctx.strokeStyle = '#111520'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+
+  // X labels
+  ctx.fillStyle = '#4a5568'; ctx.font = '9px IBM Plex Mono'; ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(eers.length / 6));
+  for (let i = 0; i < eers.length; i += step) {
+    ctx.fillText(`#${i + 1}`, toX(i), H - pad.b + 14);
+  }
+
+  // History strip
+  updateHistoryStrip();
+}
+
+function updateHistoryStrip() {
+  const strip = el('historyStrip');
+  strip.innerHTML = '';
+  const runs = state.runs;
+  if (!runs.length) return;
+  const maxEER = Math.max(...runs.map(r => r.eer));
+  for (const r of runs) {
+    const h = Math.max(4, (r.eer / maxEER) * 32);
+    const drifted = state.baseline && (r.eer - state.baseline.eer) * 100 > 3;
+    const bar = document.createElement('div');
+    bar.className = 'history-bar';
+    bar.style.height = h + 'px';
+    bar.style.background = drifted ? 'var(--red)' : 'var(--green)';
+    bar.dataset.tip = `EER ${r.eer.toFixed(4)}`;
+    strip.appendChild(bar);
+  }
+}
+
+function updateAlertFeed(alerts, confirmed) {
+  const feed = el('alertFeed');
+  feed.innerHTML = '';
+  el('alertCount').textContent = `${alerts.length} alert${alerts.length !== 1 ? 's' : ''}`;
+
+  if (!alerts.length) {
+    feed.insertAdjacentHTML('beforeend', `
+      <div class="alert-item alert-ok" style="opacity:1;transform:none">
+        <span class="alert-tag" style="background:rgba(0,229,160,0.15);color:var(--green)">OK</span>
+        All metrics within tolerance vs baseline.
+      </div>
+    `);
+    return;
+  }
+
+  const confirmedKeys = new Set(confirmed.map(a => a.key));
+  for (const a of alerts) {
+    const isConf = confirmedKeys.has(a.key);
+    const cls    = isConf ? 'alert-confirmed' : 'alert-pending';
+    const tag    = isConf ? 'CONFIRMED' : 'PENDING';
+    const tagBg  = isConf ? 'rgba(255,71,87,0.2)' : 'rgba(245,166,35,0.2)';
+    const tagCol = isConf ? 'var(--red)' : 'var(--amber)';
+    feed.insertAdjacentHTML('beforeend', `
+      <div class="alert-item ${cls}">
+        <span class="alert-tag" style="background:${tagBg};color:${tagCol}">${tag}</span>
+        ${a.text}
+        ${isConf ? '<br><span style="opacity:0.6;font-size:10px">⚡ Email notification sent</span>' : ''}
+      </div>
+    `);
+  }
+}
+
+function updateConfirmDisplay(confirmed) {
+  const div = el('confirmState');
+  if (Object.keys(state.alertState).length === 0) {
+    div.textContent = 'No active breach counters.';
+    return;
+  }
+  const lines = [];
+  for (const [k, v] of Object.entries(state.alertState)) {
+    if (v > 0) {
+      const col = v >= CONFIRM_RUNS ? 'var(--red)' : 'var(--amber)';
+      lines.push(`<span style="color:${col}">${k}: ${v}/${CONFIRM_RUNS} runs</span>`);
+    }
+  }
+  div.innerHTML = lines.length ? lines.join('<br>') : 'No active breach counters.';
+}
+
+function showEmailStatus(n) {
+  const div = el('emailStatus');
+  el('emailStatusText').textContent =
+    `Alert email sent — ${n} confirmed drift issue${n > 1 ? 's' : ''} reported to operator.`;
+  div.style.display = 'flex';
+  setTimeout(() => { div.style.display = 'none'; }, 8000);
+}
+
+// ── Controls ───────────────────────────────────────────────────────────────
+function resetBaseline() {
+  if (state.running) return;
+  state.baseline   = null;
+  state.runs       = [];
+  state.runCount   = 0;
+  state.alertState = {};
+  state.driftMode  = false;
+  el('val-eer').textContent    = '—';
+  el('val-noizai').textContent = '—';
+  el('val-runs').textContent   = '0';
+  el('val-alerts').textContent = '0';
+  el('sub-eer').textContent    = 'awaiting first run';
+  el('sub-noizai').textContent = 'awaiting first run';
+  el('sub-runs').textContent   = 'baseline not set';
+  el('sub-alerts').textContent = 'all clear';
+  el('delta-eer').style.display   = 'none';
+  el('delta-noizai').style.display = 'none';
+  el('card-eer').className    = 'card ok';
+  el('card-noizai').className = 'card ok';
+  el('card-alerts').className = 'card ok';
+  el('sourceBody').innerHTML = '<tr><td colspan="4" style="color:var(--muted);font-family:var(--mono);font-size:11px;padding:20px 8px">Run an evaluation to see per-source breakdown.</td></tr>';
+  el('comp-aasist').textContent  = '—';
+  el('comp-wav2vec').textContent = '—';
+  el('comp-rawnet').textContent  = '—';
+  el('confirmState').textContent = 'No active breach counters.';
+  el('alertFeed').innerHTML = '<div class="alert-item alert-ok" style="opacity:1;transform:none"><span class="alert-tag" style="background:rgba(0,229,160,0.15);color:var(--green)">OK</span>Baseline reset. Run an evaluation to begin monitoring.</div>';
+  el('alertCount').textContent = '0 alerts';
+  el('historyStrip').innerHTML = '';
+  const canvas = el('trendChart');
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  setMode('NO BASELINE');
+  addLog('info', 'Baseline and alert state reset.');
+}
+
+function setRunning(on) {
+  el('btnRun').disabled   = on;
+  el('btnQuick').disabled = on;
+  el('runProgress').className = on ? 'run-progress visible' : 'run-progress';
+  if (!on) {
+    el('statusText').textContent = `Last run: ${new Date().toLocaleTimeString()}`;
+  }
+}
+
+function setProgress(txt) {
+  el('progressText').textContent = txt;
+  el('statusText').textContent   = txt;
+}
+
+function setMode(txt) {
+  el('modeTag').textContent = txt;
+}
+
+// ── Log ────────────────────────────────────────────────────────────────────
+function addLog(level, msg) {
+  const term = el('terminal');
+  const ts   = new Date().toISOString().slice(11, 19);
+  const col  = { info: 'log-info', warn: 'log-warn', error: 'log-error', dim: 'log-dim' }[level] || 'log-dim';
+  const lvl  = { info: 'INFO ', warn: 'WARN ', error: 'ERROR', dim: '    ' }[level] || '    ';
+  term.insertAdjacentHTML('beforeend',
+    `<div><span class="log-ts">${ts}</span>  <span class="${col}">${lvl}</span>  ${msg}</div>`);
+  term.scrollTop = term.scrollHeight;
+}
+
+function clearLog() { el('terminal').innerHTML = ''; }
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+const el    = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ── Init ───────────────────────────────────────────────────────────────────
+addLog('info', 'Drift monitor UI initialised.');
+addLog('dim',  `Confirmation threshold: ${CONFIRM_RUNS} consecutive runs.`);
+addLog('dim',  'Click "Run Full Evaluation" to begin, or "Simulate Drift" after setting a baseline.');
+</script>
+</body>
+</html>
