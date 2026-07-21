@@ -81,7 +81,10 @@ loadtest_input/
 .superpowers/
 explain_out/
 archive/
-*_backup.py
+# Root-level only: these are dev leftovers like drift_monitor_v8_backup.py.
+# Unanchored, this also swallowed tests/test_backup.py — a real test that must
+# reach CI. archive/ is already ignored wholesale on the line above.
+/*_backup.py
 debug.py
 file.py
 _v8mod.py
