@@ -29,7 +29,12 @@ async def lifespan(app):
 
 
 app = FastAPI(title="VoiceGuard V9", version="9", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"],
+# Server-to-server deployment: no browser origin needs access, so the default is
+# an empty allowlist. Set VOICEGUARD_ALLOWED_ORIGINS (comma-separated) to serve the
+# demo UI at / from a browser on another origin.
+_ALLOWED_ORIGINS = [o.strip() for o in
+                    os.environ.get("VOICEGUARD_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
 
 security = HTTPBearer(auto_error=False)

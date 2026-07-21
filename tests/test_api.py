@@ -118,3 +118,8 @@ def test_detect_oversize_413(client, auth_key, monkeypatch):
                     headers=_hdr(auth_key))
     assert r.status_code == 413
     assert r.json().get("max_mb") == 1
+
+
+def test_cors_is_not_wildcard_by_default(client):
+    r = client.get("/ping", headers={"Origin": "https://evil.example"})
+    assert r.headers.get("access-control-allow-origin") != "*"
