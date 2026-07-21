@@ -1,0 +1,75 @@
+# VoiceGuard — production stack for a single DigitalOcean Droplet.
+# Spec: docs/superpowers/specs/2026-07-18-voiceguard-deployment-design.md
+#
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# api and worker run the SAME image and share state through vg-data (SQLite job
+# queue + auth_keys.json + transient uploads). The ~387 MB v9h bundle is baked
+# into the image — there is deliberately no model volume, because a named volume
+# is seeded from the image only while empty and would pin the model at whatever
+# version first started, making every later model update invisible.
+#
+# The project name is pinned so the named volumes are always voiceguard_vg-data
+# etc. regardless of the directory this file sits in. The backup cron and the
+# runbook reference /var/lib/docker/volumes/voiceguard_vg-data/_data by that
+# exact name — deriving it from the directory would silently break them.
+name: voiceguard
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    # The ONLY published port, and only on the private VPC interface. Binding
+    # 0.0.0.0 here would expose the detector to the public internet.
+    ports:
+      - "${VG_BIND_IP}:${VG_PORT}:8443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data        # internal CA + issued certs; MUST persist across deploys
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  api:
+    image: ${VOICEGUARD_IMAGE}
+    command: ["api"]
+    # No `ports:` — reachable only from caddy on the internal compose network.
+    expose: ["7860"]
+    env_file: [.env]
+    volumes:
+      - vg-data:/data
+    healthcheck:
+      # python-slim has no curl; urllib is already in the interpreter.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:7860/ping', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # api.py's lifespan runs detector.startup_check(), which loads ~387 MB and
+      # classifies a fixture before the app accepts traffic. Generous start_period
+      # keeps a cold start from being reported as a failure.
+      start_period: 180s
+    restart: unless-stopped
+    logging: *logging
+
+  worker:
+    image: ${VOICEGUARD_IMAGE}
+    command: ["worker"]
+    env_file: [.env]
+    volumes:
+      - vg-data:/data          # same volume: consumes the queue api writes to
+    depends_on: [api]
+    # 1 replica to start. jobs.claim_next uses BEGIN IMMEDIATE, so scaling to 2 is
+    # safe if the queue backs up: `docker compose -f docker-compose.prod.yml up -d --scale worker=2`
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  vg-data:
+  caddy-data:
+  caddy-config:
