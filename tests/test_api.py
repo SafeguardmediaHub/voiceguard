@@ -1,5 +1,5 @@
 # tests/test_api.py
-import os, sys
+import json, os, sys
 import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi.testclient import TestClient
@@ -7,7 +7,18 @@ from fastapi.testclient import TestClient
 pytestmark = pytest.mark.weights
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FAKE = os.path.join(REPO, "tests/golden_clips/fake_noizai_a4cd.mp3")
+FAKE_NAME = "fake_noizai_a4cd.mp3"
+FAKE = os.path.join(REPO, "tests/golden_clips", FAKE_NAME)
+
+# The expected verdict/score come from the golden manifest — the same source
+# test_golden.py pins against — rather than being hardcoded here. Hardcoded
+# copies go stale silently: this assertion sat at LIKELY_FAKE/0.8167 while the
+# manifest and the detector both said AUTO_FAKE/0.9235, and nothing caught it
+# because the weights CI tier never got far enough to run.
+with open(os.path.join(REPO, "tests/golden_manifest.json"), encoding="utf-8") as _f:
+    _GOLDEN = json.load(_f)
+GOLDEN_FAKE = _GOLDEN["clips"][FAKE_NAME]
+SCORE_TOL = _GOLDEN.get("score_tol", 1e-3)
 
 
 @pytest.fixture(scope="module")
@@ -97,7 +108,8 @@ def test_detect_async_e2e(client, auth_key):
     assert r.status_code == 200
     j = r.json()
     assert j["status"] == "done"
-    assert j["result"]["verdict"] == "LIKELY_FAKE" and abs(j["result"]["score"] - 0.8167) < 1e-3
+    assert j["result"]["verdict"] == GOLDEN_FAKE["verdict"]
+    assert abs(j["result"]["score"] - GOLDEN_FAKE["score"]) < SCORE_TOL
 
 
 def test_drift_requires_key(client, auth_key):
