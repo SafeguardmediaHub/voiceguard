@@ -4,9 +4,28 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
-# weights & data (pulled from Spaces at runtime, not built into the image)
+# Runtime state & secrets — MUST NOT enter the image (Dockerfile does `COPY . .`,
+# and image layers get pushed to DOCR). Runtime reads these from the /data volume
+# instead: VOICEGUARD_JOBS_DB, VOICEGUARD_AUTH_KEYS, VOICEGUARD_JOBS_INPUT.
+auth_keys.json
+*.db
+*.db-wal
+*.db-shm
+jobs_input/
+.env
+.env.*
+!.env.example
+# Dev artifacts with no runtime role.
+*.docx
+.pytest_cache/
+voice_guard 0ffline/
+# weights & data. The active bundle (v9h) IS baked in so the image runs fully
+# offline; the flat models/ dir and inactive bundles stay out to keep it small.
 models/
-model_store/
+model_store/*
+!model_store/ACTIVE.json
+!model_store/registry.jsonl
+!model_store/v9h
 data/
 cv-corpus-*/
 bias_audit/
