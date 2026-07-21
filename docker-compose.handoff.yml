@@ -1,0 +1,35 @@
+# VoiceGuard — self-contained handoff stack (full API test).
+#
+# For a tester who only has the pushed image (no source, no secrets). The active
+# model bundle (v9h) is baked into the image, so there is NO model volume and NO
+# DigitalOcean Spaces credentials required. The api + worker share only the job
+# queue + auth-key store via one named volume.
+#
+#   1. edit the image name below to match what you pushed
+#   2. docker login   (private repo)
+#   3. docker compose -f docker-compose.handoff.yml up -d
+#   4. create an API key (see the runbook in the handoff notes)
+#
+services:
+  api:
+    image: YOURUSER/voiceguard:v9h        # <-- change to your pushed image:tag
+    command: ["api"]
+    ports: ["7860:7860"]
+    environment:
+      WORKERS: "3"
+      # SPACES_* deliberately unset -> entrypoint skips the remote pull and uses
+      # the baked-in v9h bundle. Nothing else needs configuring.
+    volumes:
+      - vg-data:/data                     # shared job queue + auth_keys.json
+    restart: unless-stopped
+
+  worker:
+    image: YOURUSER/voiceguard:v9h        # <-- same image:tag as api
+    command: ["worker"]
+    volumes:
+      - vg-data:/data                     # same volume: worker consumes queued jobs
+    depends_on: [api]
+    restart: unless-stopped
+
+volumes:
+  vg-data:
