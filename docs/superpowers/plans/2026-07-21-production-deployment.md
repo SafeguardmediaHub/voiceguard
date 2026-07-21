@@ -511,8 +511,13 @@ voiceguard.internal:8443 {
 	# First of three enforcement points for the upload cap (the others are
 	# VOICEGUARD_MAX_UPLOAD_MB in .env and the backend client). Rejecting here
 	# means an oversized body never touches the Python process.
+	#
+	# MiB, not MB: Caddy parses "25MB" as decimal (25,000,000 bytes) while
+	# api.py computes max_mb * 1024 * 1024 (26,214,400). With "25MB" a 24 MiB
+	# upload the API would accept was rejected by Caddy with a 413. "25MiB"
+	# makes both enforce exactly 26,214,400 bytes.
 	request_body {
-		max_size 25MB
+		max_size 25MiB
 	}
 
 	reverse_proxy api:7860 {
@@ -524,8 +529,8 @@ voiceguard.internal:8443 {
 			write_timeout 180s
 			dial_timeout 5s
 		}
-		# Preserve the caller's identity for api-side logging.
-		header_up X-Forwarded-For {remote_host}
+		# X-Forwarded-For is set by reverse_proxy's default header handling —
+		# setting it explicitly makes Caddy emit an "unnecessary" warning.
 	}
 
 	log {
