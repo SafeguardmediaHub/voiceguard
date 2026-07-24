@@ -444,10 +444,19 @@ from bundle_registry import Registry as _Registry
 
 def _resolve_bundle_paths():
     """Return (paths_dict, version, manifest). Uses the active registry bundle
-    if present; otherwise falls back to the legacy models/*_v9* layout."""
+    if present; otherwise falls back to the legacy models/*_v9* layout.
+
+    $VOICEGUARD_FORCE_BUNDLE overrides the active pointer with a specific
+    registered version, WITHOUT touching ACTIVE.json. This lets the promotion
+    health gate (scripts/submodel_health.py via bundle_registry) load and probe
+    a *candidate* bundle before it is promoted — a pre-promotion check with no
+    live-pointer flip. Never set it on a serving process."""
+    forced = os.environ.get("VOICEGUARD_FORCE_BUNDLE")
     try:
         reg = _Registry()
-        version = reg.get_active()
+        version = forced or reg.get_active()
+        if forced:
+            print(f"  [FORCE_BUNDLE] overriding active pointer -> {forced}")
     except Exception as e:
         print(f"  registry unavailable ({e}); using legacy model paths"); version = None
     if version:

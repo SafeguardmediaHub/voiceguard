@@ -262,6 +262,10 @@ def _build_cli():
     pr.add_argument("--actor", default="cli"); pr.add_argument("--reason", default="")
     pr.add_argument("--restart", action="store_true",
                     help="run $VOICEGUARD_RESTART_CMD after promoting")
+    pr.add_argument("--skip-health", action="store_true",
+                    help="skip the per-sub-model health gate (records the skip in the reason)")
+    pr.add_argument("--health-min-spread", type=float, default=0.05,
+                    help="collapse floor passed to the health gate (default 0.05)")
     rb = sub.add_parser("rollback"); rb.add_argument("--actor", default="cli")
     rb.add_argument("--reason", default=""); rb.add_argument("--restart", action="store_true")
     vf = sub.add_parser("verify"); vf.add_argument("version")
@@ -270,6 +274,48 @@ def _build_cli():
     sub.add_parser("migrate-v9")
     lg = sub.add_parser("log"); lg.add_argument("version")
     return p
+
+
+def _run_health_gate(version, min_spread=0.05):
+    """Run the per-sub-model health check against `version` as a CANDIDATE, before
+    it is promoted. Loads the candidate via $VOICEGUARD_FORCE_BUNDLE (no live-pointer
+    flip) in a subprocess (detector loads its models at import).
+
+    Returns (ok: bool, detail: str). ok is False on a collapsed sub-model; a
+    missing probe set is a distinct "cannot certify" outcome the caller must
+    decide on. This exists because the AASIST V9 collapse passed every existing
+    gate — all of which check ENSEMBLE output, not per-sub-model contribution.
+    See docs/GRC_CONTROL_PACK.md G1/R4 and scripts/submodel_health.py.
+    """
+    import subprocess
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "scripts", "submodel_health.py")
+    if not os.path.exists(script):
+        return False, f"health script not found: {script}"
+    env = dict(os.environ, VOICEGUARD_FORCE_BUNDLE=version)
+    proc = subprocess.run(
+        [sys.executable, script, "--json", "--min-spread", str(min_spread)],
+        env=env, capture_output=True, text=True)
+    # The health script emits one sentinel-prefixed JSON line on stdout (even on a
+    # FAIL exit); detector's import prints a lot of other noise there, so we grep
+    # for the prefix rather than parsing the whole stream. Absent prefix => the
+    # candidate did not even produce a result (failed to load, or no probe data).
+    prefix = "HEALTH_RESULT_JSON "
+    result = None
+    for line in proc.stdout.splitlines():
+        if line.startswith(prefix):
+            try:
+                result = json.loads(line[len(prefix):])
+            except Exception:
+                result = None
+            break
+    if result is None:
+        return None, (proc.stderr.strip() or proc.stdout.strip() or "health check produced no result")
+    if result.get("passed"):
+        weak = ", ".join(result.get("weak", [])) or "none"
+        return True, (f"all sub-models varied (no collapse); weak-but-alive: {weak} "
+                      f"[probe {result['n_real']}real/{result['n_fake']}fake]")
+    return False, f"COLLAPSED sub-model(s): {', '.join(result.get('collapsed', []))}"
 
 
 def _maybe_restart(do_restart):
@@ -295,7 +341,29 @@ def main(argv=None):
     elif args.cmd == "register":
         print("registered:", reg.register_bundle(args.bundle_dir))
     elif args.cmd == "promote":
-        reg.promote(args.version, actor=args.actor, reason=args.reason)
+        reason = args.reason
+        if args.skip_health:
+            print("  [health gate] SKIPPED (--skip-health)")
+            reason = (reason + " [health-gate:skipped]").strip()
+        else:
+            ok, detail = _run_health_gate(args.version, min_spread=args.health_min_spread)
+            if ok is None:
+                # Could not certify (usually: probe data absent). Fail closed —
+                # the operator must supply probe data or pass --skip-health.
+                print(f"  [health gate] CANNOT CERTIFY: {detail}", file=sys.stderr)
+                print("  Provide the probe folders (studio_clips, bias_audit_fakes, ...) "
+                      "or re-run with --skip-health to promote without the gate.",
+                      file=sys.stderr)
+                raise SystemExit(2)
+            if not ok:
+                print(f"  [health gate] FAILED: {detail}", file=sys.stderr)
+                print(f"  Refusing to promote {args.version}. A collapsed sub-model feeds the "
+                      "fusion a dead feature (the AASIST V9 failure). Fix the candidate or "
+                      "override with --skip-health.", file=sys.stderr)
+                raise SystemExit(1)
+            print(f"  [health gate] PASSED: {detail}")
+            reason = (reason + " [health-gate:passed]").strip()
+        reg.promote(args.version, actor=args.actor, reason=reason)
         print(f"promoted {args.version} (active). Restart the server to apply.")
         _maybe_restart(args.restart)
     elif args.cmd == "rollback":
