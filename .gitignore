@@ -29,6 +29,7 @@ output/
 *_report_*.json
 drift_log.jsonl
 drift_alert_state.json
+governance/          # live tamper-evident audit log + model registry (runtime state)
 
 # ── Large data / corpora / generated sets ──
 data/

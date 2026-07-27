@@ -647,17 +647,43 @@ def verdict_from_score(score):
         return "AUTO_REAL"
 
 
-def _write_audit_log(audit_id, sha256, verdict, score):
-    """Append one chain-of-custody line to output/audit_log.jsonl. Never fatal."""
+def _active_model_versions():
+    """Which model weights produced this score, for the audit record: the active
+    bundle version plus each sub-model checkpoint's short SHA-256 from the active
+    manifest. Content hashes ARE the version identity here — the registry tracks
+    weights by hash, not an integer counter (torch.save is non-deterministic, so
+    a byte hash is the only stable fingerprint)."""
+    m = _ACTIVE_MANIFEST or {}
+    files = m.get("files", {})
+    versions = {"bundle": ACTIVE_VERSION}
+    for fname in ("lcnn.pt", "aasist.pt", "wav2vec.pt", "rawnet.pt", "xgb.json"):
+        sha = files.get(fname, {}).get("sha256")
+        if sha:
+            versions[fname.split(".")[0]] = sha[:12]
+    return versions
+
+
+def _write_audit_log(audit_id, intake_sha256, verdict, score, model_versions):
+    """Append one tamper-evident, hash-chained entry to the governance audit log
+    (governance/audit_log.jsonl) for this detection. Each entry embeds the prior
+    entry's hash, so any later edit, deletion, or reorder is detectable with
+    `python governance.py verify-chain` — a plain jsonl line (the earlier design)
+    could be edited undetectably. Never fatal: an audit-write failure must not
+    fail a detection the caller already paid for.
+
+    Chain integrity assumes a single writer. Real detections run only in the
+    sequential worker (worker.py), which processes one job at a time; the API
+    workers enqueue but never call detect(), and startup_check() passes
+    audit=False so concurrent boots don't interleave appends here."""
     try:
-        out_dir = os.environ.get("DRIFT_OUTPUT_DIR", os.path.join(BASE, "output"))
-        os.makedirs(out_dir, exist_ok=True)
-        with open(os.path.join(out_dir, "audit_log.jsonl"), "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "audit_id": audit_id, "sha256": sha256, "verdict": verdict,
-                "score": round(score, 4),
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
-            }) + "\n")
+        import governance
+        governance.AuditLog().append(
+            audit_id=audit_id,
+            intake_sha256=intake_sha256,
+            model_versions=model_versions,
+            score=round(float(score), 4),
+            verdict=verdict,
+        )
     except Exception as e:
         print(f"  audit log write failed: {e}")
 
@@ -742,8 +768,13 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════
 #  Detection
 # ══════════════════════════════════════════════════════════════════════════
-def detect(file_path):
-    """V9 cascade detection over a chunked long-audio pipeline."""
+def detect(file_path, audit=True):
+    """V9 cascade detection over a chunked long-audio pipeline.
+
+    audit=True writes a tamper-evident audit-log entry for this detection (the
+    live-path default). Internal calls that are not customer detections — e.g.
+    the startup smoke-check — pass audit=False so they don't pollute the
+    chain-of-custody log or interleave appends across concurrent boots."""
     t0 = time.time()
     codec = get_codec(file_path)
 
@@ -888,7 +919,8 @@ def detect(file_path):
     verdict = verdict_from_score(score)
 
     with open(file_path, "rb") as f:
-        sha256 = hashlib.sha256(f.read()).hexdigest()[:16] + "..."
+        sha256_full = hashlib.sha256(f.read()).hexdigest()
+    sha256 = sha256_full[:16] + "..."          # truncated for the response display
 
     audit_id   = explain_signals.new_audit_id()
     confidence = explain_signals.compute_confidence([c['score'] for c in chunk_results], score)
@@ -927,7 +959,9 @@ def detect(file_path):
         except Exception as e:
             print(f"  adversarial monitor failed: {e}")
 
-    _write_audit_log(audit_id, sha256, verdict, score)
+    if audit:
+        # Full intake hash into the durable audit record (not the truncated display).
+        _write_audit_log(audit_id, sha256_full, verdict, score, _active_model_versions())
 
     # Explainability (Phase 3)
     try:
@@ -999,7 +1033,7 @@ def startup_check():
     if not os.path.exists(clip):
         print(f"  [smoke-check] clip not found ({clip}); skipping"); return True
     try:
-        v = detect(clip)["verdict"]
+        v = detect(clip, audit=False)["verdict"]
     except Exception as e:
         print(f"  [smoke-check] CRITICAL: scoring failed: {e}"); return False
     ok = v in sc["expected_verdicts"]

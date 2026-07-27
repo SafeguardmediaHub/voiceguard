@@ -64,7 +64,13 @@ import numpy as np
 
 # ─── Configuration ──────────────────────────────────────────────────────────
 
-GOVERNANCE_DIR = Path('/kaggle/working/governance')
+# Where the registry + tamper-evident audit log live. Overridable so the live
+# deployment can point it at a real writable volume; the module was originally
+# authored on Kaggle (/kaggle/working), which does not exist off that platform,
+# so the default is repo-relative instead.
+GOVERNANCE_DIR = Path(os.environ.get(
+    'VOICEGUARD_GOVERNANCE_DIR',
+    Path(__file__).resolve().parent / 'governance'))
 REGISTRY_PATH  = GOVERNANCE_DIR / 'model_registry.json'
 AUDIT_LOG_PATH = GOVERNANCE_DIR / 'audit_log.jsonl'
 
@@ -491,6 +497,10 @@ def cmd_verify_chain(args):
     print(json.dumps(details, indent=2))
     print()
     print("EXIT GATE: " + ("PASSED — " if is_valid else "FAILED — ") + details['message'])
+    # Exit non-zero on a broken chain so this can gate CI / a scheduled audit
+    # check — a printed "FAILED" that still exits 0 silently passes the gate.
+    if not is_valid:
+        sys.exit(1)
 
 def cmd_test_determinism(args):
     GOVERNANCE_DIR.mkdir(parents=True, exist_ok=True)

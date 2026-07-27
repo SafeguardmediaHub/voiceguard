@@ -25,9 +25,9 @@ The single consolidated list of everything the four documentation documents surf
 | Tier | Meaning | Items |
 |---|---|---|
 | **P0 — Blocking** | Must resolve before enterprise sale | C1, C2 |
-| **P1 — High** | Fix before relying on published claims or the next promotion | H1–H9 |
-| **P2 — Medium** | Fix in the normal course of hardening | M1–M9 |
-| **Resolved** | Fixed during this documentation pass | X1, X2, X3 |
+| **P1 — High** | Fix before relying on published claims or the next promotion | H1, H2, H3, ~~H4~~ ✅, H5, H6, H7, ~~H8~~ ✅, H9 |
+| **P2 — Medium** | Fix in the normal course of hardening | M1–M6, ~~M7~~ ✅, M8, M9 |
+| **✅ Resolved** | Fixed during this pass | X1, X2, X3, X4 (+ H4) |
 
 ---
 
@@ -70,7 +70,7 @@ V9 val EER **13.25% was computed with an inverted softmax**; the correct value i
 No public benchmark has ever been run. ASVspoof 2021 LA harness is built (`scripts/asvspoof_eval.py`); ASVspoof 2019 is already a *training* set so cannot serve as independent.
 **Fix:** Run ASVspoof 2021 LA; publish the EER. **[GRC R10/G6]**
 
-### H4 — Wire the sub-model health check into the promotion gate ✅
+### H4 — Wire the sub-model health check into the promotion gate ✅ DONE
 **RESOLVED 2026-07-24.** `bundle_registry.py promote` now runs the health gate on the **candidate** before flipping the pointer. Implementation: `detector.py` honours `$VOICEGUARD_FORCE_BUNDLE` so the gate loads the candidate (not the active bundle) with no live-pointer flip; `bundle_registry._run_health_gate()` runs `submodel_health.py` in a subprocess against it. Fail-closed: a collapsed sub-model → exit 1, promote refused; missing probe data → exit 2, "cannot certify" (override with `--skip-health`, which records `[health-gate:skipped]` in the reason). Verified end-to-end: passes `v9h`; a simulated collapse (constant-output model, spread 0.0000) is caught and blocks promotion; all four CLI paths correct. **[GRC G1/R4 — closed]**
 **Follow-on:** the health gate belongs in GRC **Policy 6** (model-validation acceptance criteria) as a written requirement, not only a code path.
 
@@ -86,9 +86,8 @@ An internal finding that V9 misses ~half of TTS/multilingual fakes conflicts wit
 Parity PASS rests on 5 of 7 languages; Pidgin was tested with **Nigerian-English** TTS; Hausa train/test fakes came from one generation run; 25 of 50 Hausa test files are corrupt.
 **Fix:** Add scope caveats to the bias-audit report and every summary that quotes "parity PASS". Longer term, generate proper Yoruba/Igbo/Pidgin fakes. **[GRC R9]**
 
-### H8 — Named human approver on promotion ⬜
-Promotion actors are process labels (`route-b`, `eval`), not people. ISO 42001 change control expects an accountable named approver.
-**Fix:** Require `--actor "name"` on `promote`/`rollback` in `bundle_registry.py`. **[GRC G4/R14]**
+### H8 — Named human approver on promotion ✅ DONE
+**RESOLVED 2026-07-27.** `bundle_registry.py` now rejects generic/placeholder actors (`cli`, `admin`, `root`, blanks, anything <3 chars) on both `promote` and `rollback` via `_require_named_actor()`. A real name (`--actor "firstname.lastname"`) is required and lands in the tamper-evident chain. Verified: `cli`/`ab` rejected, `michael.ologungbara`/`Jane Doe` accepted. **[GRC G4/R14 — closed]**
 
 ### H9 — Screener reproducibility ⬜
 The deployed screener's 8.18% EER is a best-of-50 from a run oscillating 8–57%. It drives ~86% of traffic. Whether that number reproduces on retrain is unknown.
@@ -106,7 +105,7 @@ The deployed screener's 8.18% EER is a best-of-50 from a run oscillating 8–57%
 | M4 | `models/` source checkpoints not integrity-managed | Extend the registry to hash source checkpoints | R19/G6-sec |
 | M5 | No penetration test | Commission one (Phase 7 exit gate) | G13 |
 | M6 | Legal explainability template unreviewed | Non-technical reviewer sign-off (Phase 6 exit gate) | G14 |
-| M7 | **`v9` cannot be loaded by the current `detector.py` at all** — its `aasist.pt` is the from-scratch V9 architecture (`bn0`, `sinc.hamming`, `sinc.n_` shape [1,63]) while the current AASIST class expects the V8 shape. Rolling back to `v9` would **crash on startup**, not merely serve a weak model. Found 2026-07-24 while testing the health gate. | Mark `v9` rollback-blocked in the registry (now mandatory, not advisory) | VG-DOC-004 §9 |
+| M7 ✅ | **`v9` cannot be loaded by the current `detector.py` at all** — its `aasist.pt` is the from-scratch V9 architecture (`bn0`, `sinc.hamming`, `sinc.n_` shape [1,63]) while the current AASIST class expects the V8 shape. Rolling back to `v9` would **crash on startup**. **DONE 2026-07-27:** `BLOCKED_VERSIONS` in `bundle_registry.py` refuses both promoting `v9` and rolling back *into* `v9`, with the reason surfaced. Verified. | ✅ resolved | VG-DOC-004 §9 |
 | M8 | "identical" screener/student checkpoints are not identical; `lcnn_v9_results.json` is 0 bytes | Correct the doc; regenerate or formally retire the results file | VG-DOC-004 §9.2/§9.3 |
 | M9 | **torch.save is non-deterministic** (found during X3) — no checkpoint is byte-reproducible from inputs | Adopt content-hashing for provenance (weights + metadata), keeping file-SHA for tamper detection only. `retune_cascade.py --match-content` is the pattern | new |
 

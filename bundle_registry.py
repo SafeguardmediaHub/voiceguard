@@ -18,9 +18,33 @@ BUNDLE_FILES = {
     "xgb.json", "cal.json", "thresholds.json", "lcnn.pt",
 }
 
+# Versions that must never become active again, with the reason (shown on refusal).
+# v9: its aasist.pt is the from-scratch V9 architecture (bn0 / sinc.hamming /
+# sinc.n_ shape [1,63]); the current detector.py AASIST class expects the V8 shape,
+# so loading v9 raises at startup — a rollback to it would CRASH the service, not
+# merely serve a weak model. See docs/MODEL_INVENTORY.md §9 and REMEDIATION_PLAN M7.
+BLOCKED_VERSIONS = {
+    "v9": "aasist.pt is the collapsed from-scratch V9 arch; current detector.py "
+          "cannot load it (would crash on startup). See REMEDIATION_PLAN M7.",
+}
+
+# Generic/placeholder actors are rejected: promotion and rollback are production
+# changes and ISO 42001 change control expects a named, accountable human.
+_GENERIC_ACTORS = {"", "cli", "unknown", "none", "n/a", "na", "admin", "root", "user"}
+
 
 class BundleError(Exception):
     pass
+
+
+def _require_named_actor(actor):
+    """Raise unless `actor` looks like a real, named approver (not a placeholder)."""
+    a = (actor or "").strip()
+    if a.lower() in _GENERIC_ACTORS or len(a) < 3:
+        raise BundleError(
+            f"a named human approver is required (got {actor!r}); "
+            "pass --actor \"firstname.lastname\" — promotion/rollback is a production "
+            "change and must be attributable (ISO 42001 change control).")
 
 
 def _now():
@@ -161,6 +185,9 @@ class Registry:
         os.replace(tmp_path, self.active_path)
 
     def promote(self, version, actor="cli", reason=""):
+        _require_named_actor(actor)
+        if version in BLOCKED_VERSIONS:
+            raise BundleError(f"{version} is blocked from activation: {BLOCKED_VERSIONS[version]}")
         if self.get_bundle(version) is None:
             raise BundleError(f"cannot promote unregistered version: {version}")
         if not self.verify_integrity(version):
@@ -169,10 +196,15 @@ class Registry:
         self._append_active(version, prev_version=prev, actor=actor, reason=reason)
 
     def rollback(self, actor="cli", reason=""):
+        _require_named_actor(actor)
         log = self._read_active_log()
         if not log or log[-1].get("prev_version") is None:
             raise BundleError("no previous active version to roll back to")
         target = log[-1]["prev_version"]
+        if target in BLOCKED_VERSIONS:
+            raise BundleError(
+                f"cannot roll back to {target}: {BLOCKED_VERSIONS[target]} "
+                f"Promote a specific safe version explicitly instead.")
         self._append_active(target, prev_version=log[-1]["version"],
                             actor=actor, reason=reason or "rollback")
         return target
@@ -259,14 +291,19 @@ def _build_cli():
     sub.add_parser("active")
     r = sub.add_parser("register"); r.add_argument("bundle_dir")
     pr = sub.add_parser("promote"); pr.add_argument("version")
-    pr.add_argument("--actor", default="cli"); pr.add_argument("--reason", default="")
+    pr.add_argument("--actor", default="cli",
+                    help="named human approver, e.g. \"firstname.lastname\" (REQUIRED — "
+                         "generic values like 'cli' are rejected)")
+    pr.add_argument("--reason", default="")
     pr.add_argument("--restart", action="store_true",
                     help="run $VOICEGUARD_RESTART_CMD after promoting")
     pr.add_argument("--skip-health", action="store_true",
                     help="skip the per-sub-model health gate (records the skip in the reason)")
     pr.add_argument("--health-min-spread", type=float, default=0.05,
                     help="collapse floor passed to the health gate (default 0.05)")
-    rb = sub.add_parser("rollback"); rb.add_argument("--actor", default="cli")
+    rb = sub.add_parser("rollback")
+    rb.add_argument("--actor", default="cli",
+                    help="named human approver, e.g. \"firstname.lastname\" (REQUIRED)")
     rb.add_argument("--reason", default=""); rb.add_argument("--restart", action="store_true")
     vf = sub.add_parser("verify"); vf.add_argument("version")
     ps = sub.add_parser("push"); ps.add_argument("version", nargs="?"); ps.add_argument("--active", action="store_true")
