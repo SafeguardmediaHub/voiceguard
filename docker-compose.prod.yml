@@ -64,8 +64,13 @@ services:
     volumes:
       - vg-data:/data          # same volume: consumes the queue api writes to
     depends_on: [api]
-    # 1 replica to start. jobs.claim_next uses BEGIN IMMEDIATE, so scaling to 2 is
-    # safe if the queue backs up: `docker compose -f docker-compose.prod.yml up -d --scale worker=2`
+    # 1 replica to start. Scaling up is safe if the queue backs up:
+    #   docker compose -f docker-compose.prod.yml up -d --scale worker=2
+    # Both shared-state paths are serialized — jobs.claim_next uses BEGIN IMMEDIATE,
+    # and governance.AuditLog.append takes an OS file lock (governance.chain_lock)
+    # so concurrent writers cannot break the hash chain. Note the per-process
+    # in-memory rate limiter in request_protection.py does NOT aggregate across
+    # replicas; the effective limit scales with the api worker count.
     restart: unless-stopped
     logging: *logging
 

@@ -484,6 +484,44 @@ _BUNDLE_PATHS, ACTIVE_VERSION, _ACTIVE_MANIFEST = _resolve_bundle_paths()
 print(f"  Active bundle: {ACTIVE_VERSION}")
 
 
+def _verify_bundle_before_load(version, manifest):
+    """Fail closed unless every artifact matches the SHA-256 recorded in the registry.
+
+    This runs BEFORE the torch.load calls below, and that ordering is the point:
+    the registry hashes artifacts at promote and pull time, so without this check a
+    serving process trusts whatever happens to be on disk at startup. Because
+    torch.load(weights_only=False) unpickles, anything able to write into
+    model_store/ would otherwise get code execution inside the API process.
+
+    Verifying after the load would be theatre — the pickle has already run.
+
+    A bundle with no manifest is the legacy models/ fallback, which predates the
+    registry and has no recorded hashes; it warns loudly rather than failing, so
+    the fallback still works. Every registry-resolved bundle is verified.
+    """
+    if manifest is None:
+        print(f"  [integrity] WARNING: {version} is the pre-registry fallback layout; "
+              "no recorded hashes exist, so artifacts are loaded UNVERIFIED")
+        return
+    problems = _Registry().integrity_problems(version)
+    if problems is None:
+        raise RuntimeError(
+            f"active bundle {version!r} is not in the registry, so its artifacts "
+            "cannot be verified; refusing to load. Re-register the bundle or "
+            "`python bundle_registry.py pull --active`.")
+    if problems:
+        raise RuntimeError(
+            f"bundle {version} failed integrity verification and was NOT loaded:\n  "
+            + "\n  ".join(problems)
+            + "\nThe artifacts on disk are not what was registered. Restore them or "
+              "`python bundle_registry.py pull --active`; do not start the server "
+              "until this is resolved.")
+    print(f"  [integrity] {version}: all artifacts match their registered sha256")
+
+
+_verify_bundle_before_load(ACTIVE_VERSION, _ACTIVE_MANIFEST)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  Load V9 models + LCNN cascade
 # ══════════════════════════════════════════════════════════════════════════
@@ -671,10 +709,12 @@ def _write_audit_log(audit_id, intake_sha256, verdict, score, model_versions):
     could be edited undetectably. Never fatal: an audit-write failure must not
     fail a detection the caller already paid for.
 
-    Chain integrity assumes a single writer. Real detections run only in the
-    sequential worker (worker.py), which processes one job at a time; the API
-    workers enqueue but never call detect(), and startup_check() passes
-    audit=False so concurrent boots don't interleave appends here."""
+    Concurrency: governance.AuditLog.append serializes the read-then-append under
+    an OS file lock, so the chain stays intact even with several writers (e.g. a
+    scaled-up worker). Today real detections still run only in the sequential
+    worker.py, and startup_check() passes audit=False so boot-time smoke checks
+    never enter the chain-of-custody log at all — but correctness no longer
+    depends on that remaining true."""
     try:
         import governance
         governance.AuditLog().append(

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mkdir -p "$VOICEGUARD_JOBS_INPUT" "$VOICEGUARD_MODEL_STORE" "$(dirname "$VOICEGUARD_JOBS_DB")"
+mkdir -p "$VOICEGUARD_JOBS_INPUT" "$VOICEGUARD_MODEL_STORE" "$(dirname "$VOICEGUARD_JOBS_DB")" \
+         "$VOICEGUARD_GOVERNANCE_DIR"
 
 # Fetch the active model bundle from DigitalOcean Spaces on first start (needs SPACES_* env).
 if [ -n "${SPACES_BUCKET:-}" ] && [ ! -f "$VOICEGUARD_MODEL_STORE/ACTIVE.json" ]; then

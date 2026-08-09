@@ -56,7 +56,8 @@ OUTPUTS
     governance/determinism_report_<ts>.txt
 """
 
-import os, sys, json, hashlib, argparse, time
+import os, sys, json, hashlib, argparse, time, threading
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -227,6 +228,82 @@ class ModelRegistry:
     def all_entries(self):
         return self._read()
 
+# ─── Append serialization ───────────────────────────────────────────────────
+#
+# Appending to the chain is read-last-hash → compute → write. That sequence is
+# not atomic, so two concurrent writers can read the same prev_hash and produce
+# two entries claiming the same predecessor — which verify_chain reports as
+# tampering, indistinguishable from a real attack. Losing the ability to prove
+# the log is intact is exactly the failure the log exists to prevent.
+#
+# The obvious deployment that triggers it: docker-compose.prod.yml runs api and
+# worker from one image and scaling the worker to 2 is safe for the SQLite job
+# queue (BEGIN IMMEDIATE) but not for this. So the lock is here, not in a comment
+# telling operators not to scale.
+#
+# Two layers, because both races are real: a threading.Lock for writers inside one
+# process, and an OS file lock on a sidecar .lock file for writers across
+# processes/containers sharing the volume.
+
+_THREAD_LOCKS = {}
+_THREAD_LOCKS_GUARD = threading.Lock()
+
+try:                                    # POSIX — the production path (Linux containers)
+    import fcntl
+
+    def _lock_fd(fd):
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def _unlock_fd(fd):
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+except ImportError:                     # Windows — dev machines
+    import msvcrt
+
+    def _lock_fd(fd, timeout=30.0):
+        # LK_LOCK retries for ~10s then raises; wrap it so a slow peer doesn't
+        # turn into a spurious failure.
+        deadline = time.time() + timeout
+        while True:
+            try:
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                return
+            except OSError:
+                if time.time() >= deadline:
+                    raise
+                time.sleep(0.05)
+
+    def _unlock_fd(fd):
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
+def _thread_lock_for(path):
+    key = str(path)
+    with _THREAD_LOCKS_GUARD:
+        lock = _THREAD_LOCKS.get(key)
+        if lock is None:
+            lock = _THREAD_LOCKS[key] = threading.Lock()
+    return lock
+
+
+@contextmanager
+def chain_lock(log_path):
+    """Serialize the read-then-append sequence against every other writer of this
+    log, in this process and in any other."""
+    lock_path = str(log_path) + '.lock'
+    with _thread_lock_for(log_path):
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            _lock_fd(fd)
+            try:
+                yield
+            finally:
+                _unlock_fd(fd)
+        finally:
+            os.close(fd)
+
+
 # ─── Tamper-evident audit log ───────────────────────────────────────────────
 
 class AuditLog:
@@ -268,26 +345,32 @@ class AuditLog:
     def append(self, audit_id, intake_sha256, model_versions, score, verdict,
                extra=None):
         """Add one entry. model_versions: dict like {'aasist': 3, 'wav2vec': 1, ...}
-        so the log records exactly which model versions produced this result."""
-        prev_hash = self._last_hash()
-        seq = self._count_entries() + 1
+        so the log records exactly which model versions produced this result.
 
-        entry_body = {
-            'seq': seq,
-            'audit_id': audit_id,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'intake_sha256': intake_sha256,
-            'model_versions': model_versions,
-            'score': score,
-            'verdict': verdict,
-            'extra': extra or {},
-            'prev_hash': prev_hash,
-        }
-        entry_hash = sha256_bytes(canonical_json(entry_body).encode('utf-8'))
-        entry = {**entry_body, 'entry_hash': entry_hash}
+        Reading the tail, computing the link, and writing must be one critical
+        section — see chain_lock above."""
+        with chain_lock(self.path):
+            prev_hash = self._last_hash()
+            seq = self._count_entries() + 1
 
-        with open(self.path, 'a', encoding='utf-8') as f:
-            f.write(canonical_json(entry) + '\n')
+            entry_body = {
+                'seq': seq,
+                'audit_id': audit_id,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'intake_sha256': intake_sha256,
+                'model_versions': model_versions,
+                'score': score,
+                'verdict': verdict,
+                'extra': extra or {},
+                'prev_hash': prev_hash,
+            }
+            entry_hash = sha256_bytes(canonical_json(entry_body).encode('utf-8'))
+            entry = {**entry_body, 'entry_hash': entry_hash}
+
+            with open(self.path, 'a', encoding='utf-8') as f:
+                f.write(canonical_json(entry) + '\n')
+                f.flush()
+                os.fsync(f.fileno())     # durable before the lock is released
         return entry
 
     def _count_entries(self):

@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """deploy/backup.py — nightly backup of VoiceGuard's critical state to Spaces.
 
-Backs up the two things a droplet loss would otherwise destroy:
-  * auth_keys.json — losing it revokes every client's API key
-  * jobs.db        — the job queue and its results
+Backs up the things a droplet loss would otherwise destroy:
+  * auth_keys.json              — losing it revokes every client's API key
+  * jobs.db                     — the job queue and its results
+  * governance/audit_log.jsonl  — the tamper-evident chain-of-custody log. It is
+    the one artifact whose entire purpose is durable evidence, so it is also the
+    one that must survive the droplet. Paths are relative to --data-dir, which is
+    the vg-data volume the container writes to (VOICEGUARD_GOVERNANCE_DIR).
 
 jobs.db runs in WAL mode, so it is captured with SQLite's online backup API
 rather than a file copy: a copy taken mid-write is not guaranteed consistent.
@@ -24,7 +28,9 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import remote_store
 
-ARTIFACTS = ("jobs.db", "auth_keys.json")
+# Paths relative to --data-dir. Staged (and uploaded) under their basename, which
+# is unique across this set.
+ARTIFACTS = ("jobs.db", "auth_keys.json", "governance/audit_log.jsonl")
 
 
 def snapshot_sqlite(src_path, dest_path):
@@ -61,12 +67,14 @@ def run_backup(client, bucket, prefix, data_dir, out_dir, fernet_key=None, now=N
     os.makedirs(out_dir, exist_ok=True)
     uploaded = []
 
-    for name in ARTIFACTS:
-        src = os.path.join(data_dir, name)
+    for rel in ARTIFACTS:
+        src = os.path.join(data_dir, rel)
         if not os.path.exists(src):
-            # A droplet with no keys issued yet has no auth_keys.json. Not an error.
+            # A droplet with no keys issued yet has no auth_keys.json, and one that
+            # has served no detections has no audit log. Neither is an error.
             continue
 
+        name = os.path.basename(rel)          # flatten: governance/x.jsonl -> x.jsonl
         staged = os.path.join(out_dir, name)
         if name.endswith(".db"):
             snapshot_sqlite(src, staged)

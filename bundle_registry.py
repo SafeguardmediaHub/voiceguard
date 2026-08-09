@@ -138,15 +138,35 @@ class Registry:
                 return e
         return None
 
-    def verify_integrity(self, version):
+    def integrity_problems(self, version):
+        """Recompute every artifact's SHA-256 and compare with the hash recorded in
+        registry.jsonl. Returns a list of human-readable problems; empty means the
+        bundle on disk is exactly what was registered.
+
+        registry.jsonl is the reference, not the bundle's own bundle.json: an
+        attacker who rewrote the weights could rewrite bundle.json alongside them,
+        but the registry entry is a separate, append-only record.
+
+        Returns None if `version` is not registered at all — a distinct outcome
+        from "registered and intact" that callers must not conflate.
+        """
         e = self.get_bundle(version)
         if e is None:
-            return False
-        for name, recorded_sha in e["files"].items():
+            return None
+        problems = []
+        for name, recorded_sha in sorted(e["files"].items()):
             p = os.path.join(e["dir"], name)
-            if not os.path.exists(p) or sha256_file(p) != recorded_sha:
-                return False
-        return True
+            if not os.path.exists(p):
+                problems.append(f"{name}: missing from {e['dir']}")
+                continue
+            actual = sha256_file(p)
+            if actual != recorded_sha:
+                problems.append(
+                    f"{name}: sha256 {actual[:12]} != registered {recorded_sha[:12]}")
+        return problems
+
+    def verify_integrity(self, version):
+        return self.integrity_problems(version) == []
 
     # ── ACTIVE.json (pointer) ──
     def _read_active_log(self):

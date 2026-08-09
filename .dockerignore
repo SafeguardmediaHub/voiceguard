@@ -12,6 +12,10 @@ auth_keys.json
 *.db-wal
 *.db-shm
 jobs_input/
+# The tamper-evident audit log is RUNTIME state, written to /data/governance in
+# the container (VOICEGUARD_GOVERNANCE_DIR). Baking the developer's local log in
+# would make production's chain-of-custody continue from laptop test detections.
+governance/
 .env
 .env.*
 !.env.example
