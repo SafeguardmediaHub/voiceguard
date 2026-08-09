@@ -33,10 +33,20 @@ def _expand(paths):
 
 
 def _load(p):
+    # D.FFMPEG, not a hardcoded path: this loader is reused by the promotion health
+    # gate (scripts/submodel_health.py), which has to run inside the Linux container
+    # where the Windows dev path does not exist. Honours $VOICEGUARD_FFMPEG.
     w = p + "_sw.wav"
-    subprocess.run(["C:/ffmpeg-8.1.1-full_build/bin/ffmpeg.exe", "-y", "-i", p,
-                    "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le", "-f", "wav", w],
-                   capture_output=True, timeout=30)
+    r = subprocess.run([D.FFMPEG, "-y", "-i", p,
+                        "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le", "-f", "wav", w],
+                       capture_output=True, timeout=30)
+    # Check the return code. Swallowing it made a missing ffmpeg look like a
+    # per-file decode error, which callers skip silently — so an environment with
+    # no usable ffmpeg produced an empty probe set instead of an error.
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg failed on {os.path.basename(p)} (exit {r.returncode}) using "
+            f"{D.FFMPEG!r}: {r.stderr.decode(errors='replace')[-200:]}")
     from scipy.io import wavfile
     _, d = wavfile.read(w)
     try: os.unlink(w)

@@ -52,4 +52,7 @@ archive/
 *.m4a
 *.flac
 !tests/golden_clips/
+# CC0 probe set for the promotion health gate (REMEDIATION_PLAN D9). Without it
+# the gate cannot certify inside the image and --skip-health becomes routine.
+!tests/probe_clips/
 *.log

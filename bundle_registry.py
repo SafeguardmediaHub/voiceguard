@@ -358,7 +358,9 @@ def _run_health_gate(version, min_spread=0.05):
     # for the prefix rather than parsing the whole stream. Absent prefix => the
     # candidate did not even produce a result (failed to load, or no probe data).
     prefix = "HEALTH_RESULT_JSON "
+    error_prefix = "HEALTH_ERROR "
     result = None
+    reported_error = None
     for line in proc.stdout.splitlines():
         if line.startswith(prefix):
             try:
@@ -366,8 +368,15 @@ def _run_health_gate(version, min_spread=0.05):
             except Exception:
                 result = None
             break
+        if line.startswith(error_prefix):
+            reported_error = line[len(error_prefix):].strip()
     if result is None:
-        return None, (proc.stderr.strip() or proc.stdout.strip() or "health check produced no result")
+        # Prefer the script's own sentinel-marked reason. Falling back to raw
+        # stderr buries it under the transformers/model-loading banner, which is
+        # what an operator would otherwise have to read to learn that ffmpeg is
+        # missing.
+        return None, (reported_error or proc.stderr.strip() or proc.stdout.strip()
+                      or "health check produced no result")
     if result.get("passed"):
         weak = ", ".join(result.get("weak", [])) or "none"
         return True, (f"all sub-models varied (no collapse); weak-but-alive: {weak} "

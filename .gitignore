@@ -20,6 +20,7 @@ model_store/*/*.json
 *.ogg
 *.opus
 !tests/golden_clips/**
+!tests/probe_clips/**
 
 # ── Experiment tracking / run outputs ──
 mlruns/
@@ -29,7 +30,12 @@ output/
 *_report_*.json
 drift_log.jsonl
 drift_alert_state.json
-governance/          # live tamper-evident audit log + model registry (runtime state)
+# Live tamper-evident audit log + model registry (runtime state). The comment must
+# be on its own line: .gitignore has no inline comments, so "governance/  # ..."
+# was read as one literal pattern and matched nothing, leaving real detection
+# records (intake hashes, verdicts) trackable.
+governance/
+*.jsonl.lock
 
 # ── Large data / corpora / generated sets ──
 data/
