@@ -50,7 +50,17 @@ BASE   = os.path.dirname(os.path.abspath(__file__))
 MODELS = os.path.join(BASE, "models")
 SR     = 16000
 CHUNK  = 64000          # 4s @ 16kHz — the fixed window every model expects
-DEVICE = torch.device("cpu")
+# Production runs on a CPU droplet, and that is the default here: with
+# $VOICEGUARD_DEVICE unset this is byte-identical to the previous hardcoded
+# torch.device("cpu"). Nothing in the Dockerfile, compose, or .env.example sets
+# it (fenced by tests/test_docker_context.py), so the deployed path cannot drift.
+#
+# The override exists for the H1 re-measurement (scripts/eval_bundle.py): scoring
+# the three evaluation corpora costs ~86-115 h pinned to CPU, dominated by the
+# long-form studio_clips audio. Accuracy metrics are device-insensitive; LATENCY
+# IS NOT, so any run with this set records device + latency_representative=false
+# in its summary.
+DEVICE = torch.device(os.environ.get("VOICEGUARD_DEVICE", "cpu"))
 # ffmpeg binary — 'ffmpeg' on PATH (Linux/Docker); a full path on Windows. Override with VOICEGUARD_FFMPEG.
 FFMPEG = os.environ.get("VOICEGUARD_FFMPEG",
                         "C:/ffmpeg-8.1.1-full_build/bin/ffmpeg.exe" if os.name == "nt" else "ffmpeg")
