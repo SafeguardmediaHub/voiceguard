@@ -6,7 +6,8 @@ import os as _os
 collect_ignore = []
 if _os.environ.get("VOICEGUARD_CI_FAST"):
     collect_ignore = ["test_api.py", "test_detector.py", "test_worker.py",
-                      "test_golden.py", "test_gradcam.py"]
+                      "test_golden.py", "test_gradcam.py", "test_submodel_health.py",
+                      "test_eval_bundle_weights.py"]
 
 import io
 import os

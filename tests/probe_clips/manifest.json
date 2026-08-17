@@ -1,0 +1,158 @@
+{
+  "purpose": "Fixed probe set for the per-sub-model promotion health gate (scripts/submodel_health.py). Ships inside the Docker image.",
+  "labelled": true,
+  "auc_note": "Only 2 fake clips \u2014 too few for a meaningful AUC, so the gate reports it as n/a (see MIN_FAKE_FOR_AUC). The COLLAPSE gate (output spread) is fully enforced.",
+  "corpus": "Common Voice Corpus 26.0 (2026-06-12)",
+  "licence": "CC0-1.0",
+  "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "selection": {
+    "seed": 0,
+    "per_locale": 5,
+    "locales": [
+      "ha",
+      "ig",
+      "yo"
+    ],
+    "min_ms": 4000,
+    "max_ms": 12000,
+    "rule": "one clip per distinct client_id, deterministic"
+  },
+  "clips": [
+    {
+      "file": "../golden_clips/fake_concert_hall.mp3",
+      "label": "fake",
+      "locale": null,
+      "sha256": "cf049cdf1652d798c59149d8759192eb230b13b6e75f120557a238a35756cf8f",
+      "source_clip": "fake_concert_hall.mp3",
+      "note": "already shipped for the golden regression test; referenced, not copied"
+    },
+    {
+      "file": "../golden_clips/fake_noizai_a4cd.mp3",
+      "label": "fake",
+      "locale": null,
+      "sha256": "f8b1174a98fdab19227ed47dcb47ba40c8e2aaa7ffbb422f0d9e61283a434512",
+      "source_clip": "fake_noizai_a4cd.mp3",
+      "note": "already shipped for the golden regression test; referenced, not copied"
+    },
+    {
+      "file": "cv_ha_26699728.mp3",
+      "label": "real",
+      "locale": "ha",
+      "duration_ms": 5040,
+      "sha256": "acb9aed4584ff003ba084e847c275629a7124ea7bed02423b8169561504f1fc5",
+      "source_clip": "common_voice_ha_26699728.mp3"
+    },
+    {
+      "file": "cv_ha_26720407.mp3",
+      "label": "real",
+      "locale": "ha",
+      "duration_ms": 5328,
+      "sha256": "a752504b4770d1e3705c38a25286fb6f4c71065161686aa124cdbe527b9288e0",
+      "source_clip": "common_voice_ha_26720407.mp3"
+    },
+    {
+      "file": "cv_ha_27001995.mp3",
+      "label": "real",
+      "locale": "ha",
+      "duration_ms": 6120,
+      "sha256": "4718e28467677f4dc12decff866440a49c077eff8116449abbdfd5d17f5d86fc",
+      "source_clip": "common_voice_ha_27001995.mp3"
+    },
+    {
+      "file": "cv_ha_28311027.mp3",
+      "label": "real",
+      "locale": "ha",
+      "duration_ms": 5400,
+      "sha256": "1af3d33767f5ec41f932000b921521c5a729e1629ccba47af0855b8be8123ca6",
+      "source_clip": "common_voice_ha_28311027.mp3"
+    },
+    {
+      "file": "cv_ha_28554723.mp3",
+      "label": "real",
+      "locale": "ha",
+      "duration_ms": 4248,
+      "sha256": "2e96938a3b2626186d3e010823dc422f75e15bdddafba5917e26b71c4d98f8eb",
+      "source_clip": "common_voice_ha_28554723.mp3"
+    },
+    {
+      "file": "cv_ig_30712012.mp3",
+      "label": "real",
+      "locale": "ig",
+      "duration_ms": 5796,
+      "sha256": "7888512deb6c767fc31880505ab626fc7536bc71a5d5b523d7fc057b204c2992",
+      "source_clip": "common_voice_ig_30712012.mp3"
+    },
+    {
+      "file": "cv_ig_30725912.mp3",
+      "label": "real",
+      "locale": "ig",
+      "duration_ms": 8388,
+      "sha256": "5a8e959ff3f2d86fe043fdd04212f02159a54927314574732ecb4cfb6dc3f4f6",
+      "source_clip": "common_voice_ig_30725912.mp3"
+    },
+    {
+      "file": "cv_ig_43800882.mp3",
+      "label": "real",
+      "locale": "ig",
+      "duration_ms": 7164,
+      "sha256": "e9efecb1daedb81548d9510d8121dea39bbf79ccd1987c544a3cee4576ddf0ce",
+      "source_clip": "common_voice_ig_43800882.mp3"
+    },
+    {
+      "file": "cv_ig_43801313.mp3",
+      "label": "real",
+      "locale": "ig",
+      "duration_ms": 5688,
+      "sha256": "006cfaea965c47a045d33be639a8a9cfe924edbace19b7ef5ca002b5bafa5260",
+      "source_clip": "common_voice_ig_43801313.mp3"
+    },
+    {
+      "file": "cv_ig_45351286.mp3",
+      "label": "real",
+      "locale": "ig",
+      "duration_ms": 7056,
+      "sha256": "6d88485bfb15fc8a708a57bab47e4b0d0031d681bf732076e2c96ce139e4c202",
+      "source_clip": "common_voice_ig_45351286.mp3"
+    },
+    {
+      "file": "cv_yo_36682812.mp3",
+      "label": "real",
+      "locale": "yo",
+      "duration_ms": 9000,
+      "sha256": "83fc4006bf9d0d5aac84a40533b3a3d2f13d39324b6fe209c06a0998101e4383",
+      "source_clip": "common_voice_yo_36682812.mp3"
+    },
+    {
+      "file": "cv_yo_36881188.mp3",
+      "label": "real",
+      "locale": "yo",
+      "duration_ms": 6660,
+      "sha256": "b117c17b3827b7cdc5166166cc50176d8632b47ea24b4f0b0f2e8b0d6b9534b2",
+      "source_clip": "common_voice_yo_36881188.mp3"
+    },
+    {
+      "file": "cv_yo_36917340.mp3",
+      "label": "real",
+      "locale": "yo",
+      "duration_ms": 5976,
+      "sha256": "bd2dde5ef9dd730531a340b2e73ee7eca10835cd492696e341922933f9c5b5d8",
+      "source_clip": "common_voice_yo_36917340.mp3"
+    },
+    {
+      "file": "cv_yo_36947461.mp3",
+      "label": "real",
+      "locale": "yo",
+      "duration_ms": 5688,
+      "sha256": "2704a47e5e9dec5b3b60941d3c465a07380ff776e0404a0915ce2a924186ae42",
+      "source_clip": "common_voice_yo_36947461.mp3"
+    },
+    {
+      "file": "cv_yo_37007134.mp3",
+      "label": "real",
+      "locale": "yo",
+      "duration_ms": 9900,
+      "sha256": "e76cbe09dea30ca4132782137f9d1f25b6248c261511476706a5cd30baa1b05b",
+      "source_clip": "common_voice_yo_37007134.mp3"
+    }
+  ]
+}

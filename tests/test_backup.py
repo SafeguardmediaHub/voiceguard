@@ -80,6 +80,35 @@ def test_run_backup_encrypts_when_a_key_is_supplied(tmp_path, fake_s3):
     assert Fernet(fkey.encode()).decrypt(stored) == b'[{"key_id": "k_1"}]'
 
 
+def test_run_backup_includes_the_tamper_evident_audit_log(tmp_path, fake_s3):
+    """The audit log is the one artifact whose whole purpose is durable evidence;
+    a droplet loss must not be able to destroy it."""
+    data = tmp_path / "data"
+    (data / "governance").mkdir(parents=True)
+    _make_db(str(data / "jobs.db")).close()
+    # write_bytes, not write_text: the latter translates \n -> \r\n on Windows and
+    # the backup must be a byte-for-byte copy (the hash chain is over exact bytes).
+    (data / "governance" / "audit_log.jsonl").write_bytes(
+        b'{"seq":1,"verdict":"AUTO_FAKE"}\n')
+
+    keys = backup.run_backup(fake_s3, "bkt", "p", str(data), str(tmp_path / "out"),
+                             now="2026-07-21")
+
+    assert "p/backups/2026-07-21/audit_log.jsonl" in keys
+    assert fake_s3.store[("bkt", "p/backups/2026-07-21/audit_log.jsonl")] == \
+        b'{"seq":1,"verdict":"AUTO_FAKE"}\n'
+
+
+def test_missing_audit_log_is_not_fatal(tmp_path, fake_s3):
+    """A droplet that has served no detections yet has no audit log."""
+    data = tmp_path / "data"
+    data.mkdir()
+    _make_db(str(data / "jobs.db")).close()
+
+    keys = backup.run_backup(fake_s3, "bkt", "p", str(data), str(tmp_path / "out"), now="2026-07-21")
+    assert keys == ["p/backups/2026-07-21/jobs.db"]
+
+
 def test_missing_auth_keys_is_not_fatal(tmp_path, fake_s3):
     """A droplet with no keys issued yet must still back up the queue."""
     data = tmp_path / "data"

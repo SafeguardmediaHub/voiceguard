@@ -19,6 +19,7 @@ FORBIDDEN = [
     ".env",
     ".env.production",
     "jobs_input",         # transient uploads
+    "governance",         # tamper-evident audit log: runtime state, lives on /data
     "AI_Audio_Detector_Phase_Plan.docx",
     ".pytest_cache",
     "voice_guard 0ffline",  # nested duplicate copy of the whole project
@@ -33,6 +34,11 @@ REQUIRED = [
     "VoiceGuard_LiveDemo (2).html",   # served by GET / (api.py:108)
     "model_store/ACTIVE.json",
     "model_store/registry.jsonl",
+    # Without the probe set the promotion health gate cannot certify inside the
+    # image, and --skip-health becomes the only way to promote (D9).
+    "tests/probe_clips/manifest.json",
+    "tests/probe_clips/cv_ha_26699728.mp3",
+    "tests/golden_clips/fake_noizai_a4cd.mp3",   # the probe set's fake half
 ]
 
 
@@ -58,6 +64,63 @@ def _excluded(path, rules):
         if fnmatch.fnmatch(path, pattern) or path.startswith(pattern + "/"):
             verdict = not negated
     return verdict
+
+
+def test_deploy_config_never_sets_the_device_override():
+    """detector.DEVICE honours $VOICEGUARD_DEVICE, defaulting to cpu.
+
+    The override exists only so the H1 evaluation can run on a GPU box; production
+    is a CPU droplet. If a deploy file ever set it, the serving path would silently
+    change device — and latency, throughput and the cascade's threshold behaviour
+    with it — without anyone editing detector.py. Fence it here.
+    """
+    offenders = []
+    for rel in ("Dockerfile", "docker-compose.yml", "docker-compose.prod.yml",
+                ".env.example", "deploy/entrypoint.sh"):
+        p = os.path.join(REPO, rel)
+        if not os.path.exists(p):
+            continue
+        with open(p, encoding="utf-8", errors="replace") as f:
+            for n, line in enumerate(f, 1):
+                if "VOICEGUARD_DEVICE" in line and not line.strip().startswith("#"):
+                    offenders.append(f"{rel}:{n}: {line.strip()}")
+    assert offenders == [], (
+        "deploy config sets VOICEGUARD_DEVICE; production must stay on the "
+        f"default cpu path:\n  " + "\n  ".join(offenders))
+
+
+def _dockerfile_env():
+    """DRIFT_OUTPUT_DIR=... style assignments from the Dockerfile's ENV lines."""
+    env = {}
+    with open(os.path.join(REPO, "Dockerfile"), encoding="utf-8") as f:
+        for line in f:
+            line = line.strip().rstrip("\\").strip()
+            if line.startswith("ENV "):
+                line = line[4:].strip()
+            elif "=" not in line or line.startswith("#"):
+                continue
+            for tok in line.split():
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    env[k] = v
+    return env
+
+
+def test_drift_output_dir_is_on_the_persistent_volume():
+    """api.py READS drift artifacts from $DRIFT_OUTPUT_DIR; drift_monitor_3.py WRITES
+    them there. Both default to a path inside the image (`<repo>/output` and a
+    relative `output`), which in production means two different ephemeral dirs:
+    /drift would answer empty forever, and every report would be lost on redeploy.
+    Only an explicit /data path makes the reader and the writer meet on the volume.
+    """
+    value = _dockerfile_env().get("DRIFT_OUTPUT_DIR")
+    assert value is not None, (
+        "Dockerfile does not set DRIFT_OUTPUT_DIR, so drift_monitor_3.py writes to "
+        "an ephemeral /app/output that api.py's /drift endpoint never reads.")
+    assert value.startswith("/data/"), (
+        f"DRIFT_OUTPUT_DIR={value} is not under /data — only /data is a mounted "
+        "volume (docker-compose.prod.yml: vg-data:/data), so reports would not "
+        "survive a redeploy.")
 
 
 def test_sensitive_paths_are_excluded():

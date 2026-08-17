@@ -36,6 +36,7 @@ ENV VOICEGUARD_FFMPEG=ffmpeg \
     VOICEGUARD_JOBS_INPUT=/data/jobs_input \
     VOICEGUARD_AUTH_KEYS=/data/auth_keys.json \
     VOICEGUARD_GOVERNANCE_DIR=/data/governance \
+    DRIFT_OUTPUT_DIR=/data/drift \
     PORT=7860 \
     WORKERS=3
 
