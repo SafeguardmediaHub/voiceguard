@@ -14,7 +14,18 @@ WORKDIR /app
 
 # Python deps first, so this layer caches across code changes.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Production is a CPU droplet — detector.DEVICE defaults to cpu and no deploy file may
+# set $VOICEGUARD_DEVICE (fenced by tests/test_docker_context.py). But PyPI's linux
+# torch wheels are the CUDA build: torch is 532 MB and pulls nvidia-cublas / cudnn /
+# nccl / nvshmem / cusparselt, triton and cuda-toolkit — several GB of layer that this
+# image can never execute. Install the +cpu builds of the same pinned versions first;
+# --no-deps leaves every transitive pin to requirements.txt, which then sees torch==X
+# as satisfied by X+cpu (PEP 440 ignores the local label) and downloads no torch.
+RUN pins=$(grep -E '^torch(audio|vision|codec)?==' requirements.txt) \
+ && echo "$pins" \
+ && pip install --no-cache-dir --no-deps \
+      --index-url https://download.pytorch.org/whl/cpu $pins \
+ && pip install --no-cache-dir -r requirements.txt
 
 # Bake the wav2vec2 base weights into the image so runtime is offline + deterministic.
 ENV HF_HOME=/opt/hf

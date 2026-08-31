@@ -15,6 +15,19 @@ jobs:
         with:
           python-version: "3.13"          # must match Dockerfile (audioop-lts, numpy 2.4, torch 2.12)
           cache: pip
+      # ubuntu-latest has no GPU, but PyPI's linux torch wheels are the CUDA build:
+      # torch alone is 532 MB and drags in nvidia-cublas / cudnn / nccl / nvshmem /
+      # cusparselt / triton (~1.7 GB of wheels, several GB unpacked, cached wheel copy
+      # on top). That is what filled the runner's disk -> "[Errno 28] No space left on
+      # device". Pre-install the +cpu builds of the same pinned versions from PyTorch's
+      # CPU index. --no-deps keeps every transitive pin coming from requirements.txt,
+      # which then sees torch==X as already satisfied by X+cpu (PEP 440 ignores the
+      # local label), so the next step downloads no torch at all.
+      - name: Install CPU-only torch stack
+        run: |
+          pins=$(grep -E '^torch(audio|vision|codec)?==' requirements.txt)
+          echo "$pins"
+          pip install --no-deps --index-url https://download.pytorch.org/whl/cpu $pins
       - run: pip install -r requirements.txt
       - run: python -m pytest -q
         env:
@@ -34,6 +47,12 @@ jobs:
         with:
           python-version: "3.13"          # must match Dockerfile (audioop-lts, numpy 2.4, torch 2.12)
           cache: pip
+      # Same CPU-wheel preinstall as the fast job — see the comment there for why.
+      - name: Install CPU-only torch stack
+        run: |
+          pins=$(grep -E '^torch(audio|vision|codec)?==' requirements.txt)
+          echo "$pins"
+          pip install --no-deps --index-url https://download.pytorch.org/whl/cpu $pins
       - run: pip install -r requirements.txt
       - name: Cache model bundle
         uses: actions/cache@v4
