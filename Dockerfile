@@ -53,6 +53,9 @@ ENV VOICEGUARD_FFMPEG=ffmpeg \
 
 EXPOSE 7860
 COPY deploy/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# Build contexts copied from Windows can carry CRLF endings.  Normalize the
+# entrypoint inside the Linux image so its /usr/bin/env bash shebang is valid.
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
+    && chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["api"]
