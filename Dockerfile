@@ -27,9 +27,11 @@ RUN pins=$(grep -E '^torch(audio|vision|codec)?==' requirements.txt) \
       --index-url https://download.pytorch.org/whl/cpu $pins \
  && pip install --no-cache-dir -r requirements.txt
 
-# Bake the wav2vec2 base weights into the image so runtime is offline + deterministic.
-ENV HF_HOME=/opt/hf
+# Bake external model weights into the image so runtime is offline + deterministic.
+ENV HF_HOME=/opt/hf \
+    AUDIOSEAL_CACHE_DIR=/opt/audioseal
 RUN python -c "from transformers import Wav2Vec2Model; Wav2Vec2Model.from_pretrained('facebook/wav2vec2-base')"
+RUN python -c "from audioseal import AudioSeal; AudioSeal.load_detector('audioseal_detector_16bits')"
 
 # Bake the active model bundle (v9h) as its own layer — large + stable, so it caches
 # across code changes. Only ACTIVE.json, registry.jsonl and model_store/v9h are in the
