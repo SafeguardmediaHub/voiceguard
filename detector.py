@@ -473,6 +473,12 @@ def _resolve_bundle_paths():
         entry = reg.get_bundle(version)
         if entry is not None:
             d = entry["dir"]
+            # Registry entries retain the path of the host that registered the
+            # bundle.  Images bake the same registry into /app, so use this
+            # registry's local model store when that build-host path is absent.
+            local_dir = os.path.join(reg.store_dir, version)
+            if not os.path.isdir(d) and os.path.isdir(local_dir):
+                d = local_dir
             paths = {
                 "aasist": f"{d}/aasist.pt", "wav2vec": f"{d}/wav2vec.pt",
                 "rawnet": f"{d}/rawnet.pt", "xgb": f"{d}/xgb.json",

@@ -153,11 +153,19 @@ class Registry:
         e = self.get_bundle(version)
         if e is None:
             return None
+        # Registry entries preserve the directory from the machine that pulled
+        # or registered the bundle.  A bundle baked into a Docker image therefore
+        # has a stale build-host path; verify it from this registry's local store
+        # instead when that original directory is unavailable.
+        bundle_dir = e["dir"]
+        local_bundle_dir = os.path.join(self.store_dir, version)
+        if not os.path.isdir(bundle_dir) and os.path.isdir(local_bundle_dir):
+            bundle_dir = local_bundle_dir
         problems = []
         for name, recorded_sha in sorted(e["files"].items()):
-            p = os.path.join(e["dir"], name)
+            p = os.path.join(bundle_dir, name)
             if not os.path.exists(p):
-                problems.append(f"{name}: missing from {e['dir']}")
+                problems.append(f"{name}: missing from {bundle_dir}")
                 continue
             actual = sha256_file(p)
             if actual != recorded_sha:
