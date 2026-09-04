@@ -89,6 +89,22 @@ def test_deploy_config_never_sets_the_device_override():
         f"default cpu path:\n  " + "\n  ".join(offenders))
 
 
+def test_api_entrypoint_does_not_preload_pytorch_before_fork():
+    """The FastAPI lifespan runs detector.startup_check(), including inference.
+
+    Gunicorn --preload imports the PyTorch model in the master before forking;
+    the worker can then deadlock in native thread-pool initialization.  Keep
+    application loading in the workers themselves.
+    """
+    path = os.path.join(REPO, "deploy", "docker-entrypoint.sh")
+    with open(path, encoding="utf-8") as f:
+        entrypoint = f.read()
+    assert "--preload" not in entrypoint, (
+        "Gunicorn --preload can deadlock VoiceGuard's PyTorch startup check "
+        "after workers fork"
+    )
+
+
 def _dockerfile_env():
     """DRIFT_OUTPUT_DIR=... style assignments from the Dockerfile's ENV lines."""
     env = {}

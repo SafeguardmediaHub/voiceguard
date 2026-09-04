@@ -13,7 +13,11 @@ fi
 role="${1:-api}"
 case "$role" in
   api)
-    exec gunicorn -k uvicorn.workers.UvicornWorker --preload \
+    # PyTorch's native thread pools are not safe to initialize in Gunicorn's
+    # preloaded master and then use from forked workers.  Load the application
+    # inside each worker instead; otherwise workers can stall forever in the
+    # FastAPI lifespan startup check while using no CPU.
+    exec gunicorn -k uvicorn.workers.UvicornWorker \
          -w "${WORKERS:-3}" -b "0.0.0.0:${PORT:-7860}" --timeout 120 api:app ;;
   worker)
     exec python worker.py ;;
