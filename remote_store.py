@@ -16,12 +16,25 @@ def make_client(env=os.environ):
         if not env.get(name):
             raise RuntimeError(f"missing required env var: {name}")
     import boto3                                          # lazy: only needed for a real client
+    from botocore.config import Config
+
+    # DigitalOcean Spaces is S3-compatible, but its bucket-subdomain DNS can be
+    # unavailable on some networks.  Path-style requests keep every operation on
+    # the configured regional endpoint.  Restrict checksums to operations that
+    # require them too: newer botocore versions otherwise add streaming checksum
+    # trailers which Spaces rejects for multipart uploads.
+    config = Config(
+        s3={"addressing_style": "path"},
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
+    )
     return boto3.client(
         "s3",
         region_name=env["SPACES_REGION"],
         endpoint_url=env["SPACES_ENDPOINT"],
         aws_access_key_id=env["SPACES_KEY"],
         aws_secret_access_key=env["SPACES_SECRET"],
+        config=config,
     )
 
 
