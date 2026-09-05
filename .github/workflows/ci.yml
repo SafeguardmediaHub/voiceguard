@@ -61,7 +61,13 @@ jobs:
           key: bundle-${{ github.sha }}
           restore-keys: bundle-
       - name: Pull active bundle from Spaces
-        run: python bundle_registry.py pull --active
+        run: |
+          # registry.jsonl records the machine-local bundle directory.  The
+          # checked-in/cache copy can therefore name a Windows path, which is
+          # invalid on this Linux runner.  Rebuild this local registry entry
+          # from the freshly pulled active bundle on every weights run.
+          rm -f model_store/registry.jsonl
+          python bundle_registry.py pull --active
         env:
           SPACES_KEY: ${{ secrets.SPACES_KEY }}
           SPACES_SECRET: ${{ secrets.SPACES_SECRET }}
