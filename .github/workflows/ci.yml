@@ -54,6 +54,12 @@ jobs:
           echo "$pins"
           pip install --no-deps --index-url https://download.pytorch.org/whl/cpu $pins
       - run: pip install -r requirements.txt
+      # The weights tier decodes the shipped MP3 golden/probe clips through
+      # detector.detect().  GitHub's runner image does not guarantee ffmpeg.
+      - name: Install audio decoder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
       - name: Cache model bundle
         uses: actions/cache@v4
         with:
