@@ -5,7 +5,7 @@ Run: uvicorn api:app --host 0.0.0.0 --port 7860
 import os, json, tempfile, traceback, math
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException
+from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import detector
 import auth
 import jobs
+import evaluations
 from request_protection import get_protection, hash_file_content
 
 DRIFT_OUTPUT_DIR = os.environ.get("DRIFT_OUTPUT_DIR", os.path.join(detector.BASE, "output"))
@@ -48,6 +49,20 @@ def require_api_key(creds: HTTPAuthorizationCredentials = Depends(security)) -> 
     rec = auth.verify_key(creds.credentials)
     if rec is None:
         raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+    return rec
+
+
+def require_evaluation_admin(creds: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Restrict evaluation uploads/results to a separately-scoped admin key.
+
+    Ordinary detection keys can submit customer files, but must never be able to
+    inspect or alter the labelled evaluation corpus.
+    """
+    rec = require_api_key(creds)
+    scopes = set(rec.get("scopes") or [])
+    if not ({"admin", "evaluations:admin"} & scopes):
+        raise HTTPException(status_code=403,
+                            detail="This endpoint requires an admin evaluation API key")
     return rec
 
 
@@ -114,6 +129,15 @@ def index():
     if os.path.exists(html_path):
         return FileResponse(html_path)
     return PlainTextResponse("VoiceGuard_LiveDemo (2).html not found in " + detector.BASE, status_code=404)
+
+
+@app.get("/admin/evaluations")
+def evaluation_dashboard():
+    """Serve a harmless UI shell. Its data and mutations still require admin auth."""
+    html_path = os.path.join(detector.BASE, "dashboard", "evaluations.html")
+    if os.path.exists(html_path):
+        return FileResponse(html_path)
+    return PlainTextResponse("Evaluation dashboard asset not found", status_code=404)
 
 
 @app.get("/ping")
@@ -228,6 +252,72 @@ def drift_baseline_route(client: dict = Depends(require_api_key)):
     if b is None:
         return JSONResponse(status_code=404, content={"available": False, "message": "no baseline set"})
     return _json_safe(b)
+
+
+# ── Labelled evaluation dashboard API ───────────────────────────────────────
+@app.get("/admin/evaluations/api/batches")
+def evaluation_batches(limit: int = 50, client: dict = Depends(require_evaluation_admin)):
+    return _json_safe({"batches": evaluations.list_batches(limit)})
+
+
+@app.get("/admin/evaluations/api/batches/{batch_id}")
+def evaluation_batch(batch_id: str, client: dict = Depends(require_evaluation_admin)):
+    batch = evaluations.get_batch(batch_id, include_samples=True)
+    if batch is None:
+        return JSONResponse(status_code=404, content={"error": "batch not found"})
+    return _json_safe(batch)
+
+
+@app.post("/admin/evaluations/api/batches", status_code=201)
+def evaluation_create_batch(name: str = Form(...), source: str = Form(...), label: int = Form(...),
+                            notes: str = Form(""), client: dict = Depends(require_evaluation_admin)):
+    try:
+        batch = evaluations.create_batch(client["key_id"], name, source, label, notes)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    return _json_safe(batch)
+
+
+@app.post("/admin/evaluations/api/batches/{batch_id}/files")
+def evaluation_upload_files(batch_id: str, files: list[UploadFile] = File(...),
+                            client: dict = Depends(require_evaluation_admin)):
+    max_mb = int(os.environ.get("VOICEGUARD_EVALUATION_MAX_UPLOAD_MB",
+                                os.environ.get("VOICEGUARD_MAX_UPLOAD_MB", "25")))
+    uploaded, duplicates, errors = [], [], []
+    for file in files:
+        try:
+            result = evaluations.add_upload(batch_id, file.filename, file.file, max_mb * 1024 * 1024)
+            (duplicates if result["status"] == "duplicate" else uploaded).append(result)
+        except KeyError:
+            return JSONResponse(status_code=404, content={"error": "batch not found"})
+        except ValueError as e:
+            errors.append({"filename": file.filename, "error": str(e)})
+        finally:
+            try:
+                file.file.close()
+            except Exception:
+                pass
+    code = 413 if any(e["error"] == "file too large" for e in errors) else 200
+    return JSONResponse(status_code=code, content=_json_safe({
+        "uploaded": uploaded, "duplicates": duplicates, "errors": errors, "max_mb": max_mb,
+    }))
+
+
+@app.post("/admin/evaluations/api/batches/{batch_id}/run", status_code=202)
+def evaluation_run_batch(batch_id: str, client: dict = Depends(require_evaluation_admin)):
+    try:
+        batch = evaluations.start_batch(batch_id)
+    except KeyError:
+        return JSONResponse(status_code=404, content={"error": "batch not found"})
+    except (PermissionError, ValueError) as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    return _json_safe({"batch_id": batch_id, "status": batch["status"],
+                       "message": "evaluation queued; refresh this batch for progress"})
+
+
+@app.get("/admin/evaluations/api/metrics")
+def evaluation_metrics(limit: int = 100, client: dict = Depends(require_evaluation_admin)):
+    return _json_safe({"metrics": evaluations.metrics(limit)})
 
 
 if __name__ == "__main__":

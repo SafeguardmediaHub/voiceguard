@@ -30,7 +30,7 @@ import remote_store
 
 # Paths relative to --data-dir. Staged (and uploaded) under their basename, which
 # is unique across this set.
-ARTIFACTS = ("jobs.db", "auth_keys.json", "governance/audit_log.jsonl")
+ARTIFACTS = ("jobs.db", "evaluations.db", "auth_keys.json", "governance/audit_log.jsonl")
 
 
 def snapshot_sqlite(src_path, dest_path):

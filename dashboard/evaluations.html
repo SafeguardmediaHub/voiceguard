@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoiceGuard Evaluation Dashboard</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101827; --card:#182235; --line:#334155; --text:#e5e7eb; --muted:#9ca3af; --good:#34d399; --warn:#fbbf24; --bad:#fb7185; --blue:#60a5fa; }
+    * { box-sizing:border-box; } body { margin:0; font:15px system-ui,sans-serif; color:var(--text); background:var(--bg); }
+    main { max-width:1200px; margin:0 auto; padding:28px 18px 60px; } h1 { margin:0 0 6px; } h2 { margin:0 0 14px; font-size:18px; }
+    p, .muted { color:var(--muted); } .notice { border-left:4px solid var(--warn); padding:10px 12px; background:#2b2414; margin:18px 0; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(310px,1fr)); gap:16px; } .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; }
+    label { display:block; margin:10px 0 5px; font-weight:600; } input, textarea, select, button { width:100%; padding:9px 10px; border-radius:6px; border:1px solid var(--line); color:var(--text); background:#0f172a; }
+    textarea { min-height:70px; resize:vertical; } button { cursor:pointer; font-weight:700; background:#1d4ed8; border-color:#2563eb; margin-top:14px; } button:hover { background:#2563eb; }
+    table { width:100%; border-collapse:collapse; font-size:14px; } th,td { text-align:left; padding:10px 7px; border-bottom:1px solid var(--line); vertical-align:top; } th { color:var(--muted); }
+    .pill { display:inline-block; padding:2px 7px; border-radius:999px; font-size:12px; background:#243247; } .good { color:var(--good); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+    #message { white-space:pre-wrap; min-height:22px; } .wide { margin-top:16px; } code { color:#bfdbfe; }
+  </style>
+</head>
+<body><main>
+  <h1>VoiceGuard Evaluation Dashboard</h1>
+  <p>Upload <strong>known-labelled</strong> audio in batches, evaluate it asynchronously, and track category performance over time.</p>
+  <div class="notice">New uploads are candidate evaluations. They do not modify the frozen nightly drift baseline.</div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Admin access</h2>
+      <label for="key">Evaluation admin API key</label>
+      <input id="key" type="password" autocomplete="off" placeholder="vg_…">
+      <p class="muted">The key is held only in this browser tab. Create it with <code>auth.py create --scope admin</code>.</p>
+      <button type="button" onclick="refreshAll()">Load dashboard</button>
+    </section>
+    <section class="card">
+      <h2>New evaluation batch</h2>
+      <form id="batch-form">
+        <label>Batch name <input name="name" required maxlength="120" placeholder="September 2026 ElevenLabs check"></label>
+        <label>Source category <input name="source" required pattern="[a-z0-9][a-z0-9_.-]{0,79}" placeholder="elevenlabs_v3"></label>
+        <label>Ground-truth label <select name="label"><option value="1">Fake</option><option value="0">Real</option></select></label>
+        <label>Notes / provenance <textarea name="notes" maxlength="2000" placeholder="Known generator/version, licence, recording conditions…"></textarea></label>
+        <label>Audio files <input name="files" type="file" multiple required accept=".mp3,.wav,.flac,.m4a,.ogg,.opus,audio/*"></label>
+        <button>Upload and queue evaluation</button>
+      </form>
+    </section>
+  </div>
+  <p id="message" role="status"></p>
+
+  <section class="card wide"><h2>Category performance by evaluation date</h2>
+    <table><thead><tr><th>Date</th><th>Batch</th><th>Category</th><th>Label</th><th>Usable clips</th><th>Result</th><th>Notes</th></tr></thead>
+    <tbody id="metrics"><tr><td colspan="7" class="muted">Enter the admin key, then load dashboard.</td></tr></tbody></table>
+  </section>
+  <section class="card wide"><h2>Recent batches</h2>
+    <table><thead><tr><th>Created</th><th>Name</th><th>Source</th><th>Status</th><th>Progress</th></tr></thead>
+    <tbody id="batches"><tr><td colspan="5" class="muted">No data loaded.</td></tr></tbody></table>
+  </section>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  const message = text => $('message').textContent = text;
+  const headers = () => ({Authorization: `Bearer ${$('key').value.trim()}`});
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const pct = n => n == null ? '—' : `${(n * 100).toFixed(1)}%`;
+  async function request(url, options={}) {
+    const r = await fetch(url, {...options, headers:{...headers(), ...(options.headers || {})}});
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || body.detail || `HTTP ${r.status}`);
+    return body;
+  }
+  async function refreshAll() {
+    try {
+      const [metrics, batches] = await Promise.all([request('/admin/evaluations/api/metrics'), request('/admin/evaluations/api/batches')]);
+      $('metrics').innerHTML = metrics.metrics.length ? metrics.metrics.map(m => {
+        const result = m.label === 1 ? `Catch rate: <strong class="${m.catch_rate < .7 ? 'warn' : 'good'}">${pct(m.catch_rate)}</strong>` : `False-positive rate: <strong class="${m.false_positive_rate > .1 ? 'warn' : 'good'}">${pct(m.false_positive_rate)}</strong>`;
+        return `<tr><td>${esc(new Date(m.date).toLocaleString())}</td><td>${esc(m.name)}</td><td><span class="pill">${esc(m.source)}</span></td><td>${m.label ? 'Fake' : 'Real'}</td><td>${m.n}${m.errors ? ` (+${m.errors} errors)` : ''}</td><td>${result}</td><td>${m.small_sample ? '<span class="warn">Small sample: fewer than 30 usable clips.</span>' : ''}</td></tr>`;
+      }).join('') : '<tr><td colspan="7" class="muted">No completed candidate evaluations yet.</td></tr>';
+      $('batches').innerHTML = batches.batches.length ? batches.batches.map(b => `<tr><td>${esc(new Date(b.created_at).toLocaleString())}</td><td>${esc(b.name)}</td><td>${esc(b.source)}</td><td><span class="pill">${esc(b.status)}</span></td><td>${b.summary.done}/${b.summary.total} complete${b.summary.errors ? `, ${b.summary.errors} errors` : ''}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">No batches created yet.</td></tr>';
+      message('Dashboard updated.');
+    } catch (e) { message(`Could not load dashboard: ${e.message}`); }
+  }
+  $('batch-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const files = form.getAll('files'); form.delete('files');
+    try {
+      message('Creating batch…');
+      const batch = await request('/admin/evaluations/api/batches', {method:'POST', body:form});
+      const upload = new FormData(); files.forEach(file => upload.append('files', file));
+      message(`Uploading ${files.length} file(s)…`);
+      const uploaded = await request(`/admin/evaluations/api/batches/${batch.batch_id}/files`, {method:'POST', body:upload});
+      if (!uploaded.uploaded.length) throw new Error(uploaded.errors.map(x => x.error).join('; ') || 'No new files uploaded');
+      await request(`/admin/evaluations/api/batches/${batch.batch_id}/run`, {method:'POST'});
+      e.currentTarget.reset();
+      message(`Queued ${uploaded.uploaded.length} audio file(s). Refresh in a moment to see progress.`);
+      await refreshAll();
+    } catch (err) { message(`Upload failed: ${err.message}`); }
+  });
+</script></body></html>
