@@ -34,7 +34,7 @@
       <h2>New evaluation batch</h2>
       <form id="batch-form">
         <label>Batch name <input name="name" required maxlength="120" placeholder="September 2026 ElevenLabs check"></label>
-        <label>Source category <input name="source" required pattern="[a-z0-9][a-z0-9_.\\-]{0,79}" placeholder="elevenlabs_v3"></label>
+        <label>Source category <input name="source" required pattern="[a-z0-9][a-z0-9_.\-]{0,79}" placeholder="elevenlabs_v3"></label>
         <label>Ground-truth label <select name="label"><option value="1">Fake</option><option value="0">Real</option></select></label>
         <label>Notes / provenance <textarea name="notes" maxlength="2000" placeholder="Known generator/version, licence, recording conditions…"></textarea></label>
         <label>Audio files <input name="files" type="file" multiple required accept=".mp3,.wav,.flac,.m4a,.ogg,.opus,audio/*"></label>

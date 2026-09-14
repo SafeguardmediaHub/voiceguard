@@ -81,3 +81,84 @@ jobs:
           SPACES_REGION: ${{ secrets.SPACES_REGION }}
           SPACES_BUCKET: ${{ secrets.SPACES_BUCKET }}
       - run: python -m pytest -q            # full suite incl. golden regression
+
+  deploy:
+    # CD is deliberately limited to successful pushes to the default branch.  It
+    # never runs for pull requests, scheduled CI, or a manual test workflow run.
+    # Set the repository variable VOICEGUARD_CD_ENABLED=true only after the
+    # required deployment secrets have been configured (see this job's env).
+    name: Build and deploy production image
+    needs: [fast, weights]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      vars.VOICEGUARD_CD_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      REGISTRY: registry.digitalocean.com/safeguardmedia
+      IMAGE_TAG: ${{ github.sha }}
+      DOCR_TOKEN: ${{ secrets.DOCR_TOKEN }}
+      DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+      DROPLET_KNOWN_HOSTS: ${{ secrets.DROPLET_KNOWN_HOSTS }}
+      SPACES_KEY: ${{ secrets.SPACES_KEY }}
+      SPACES_SECRET: ${{ secrets.SPACES_SECRET }}
+      SPACES_ENDPOINT: ${{ secrets.SPACES_ENDPOINT }}
+      SPACES_REGION: ${{ secrets.SPACES_REGION }}
+      SPACES_BUCKET: ${{ secrets.SPACES_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The active v9h bundle is intentionally baked into the image.  Pull it
+      # fresh here rather than relying on a workstation-only model directory.
+      - name: Install bundle downloader
+        run: python -m pip install --disable-pip-version-check numpy boto3
+      - name: Pull active model bundle
+        run: |
+          rm -f model_store/registry.jsonl
+          python bundle_registry.py pull --active
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to DigitalOcean Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: registry.digitalocean.com
+          username: ${{ secrets.DOCR_TOKEN }}
+          password: ${{ secrets.DOCR_TOKEN }}
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/voiceguard:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/voiceguard:latest
+          # This persists Docker layers between GitHub runners.  A small code
+          # change should reuse ffmpeg, Python packages, Hugging Face assets,
+          # and the unchanged v9h bundle instead of downloading them again.
+          cache-from: type=gha,scope=voiceguard-production
+          cache-to: type=gha,mode=max,scope=voiceguard-production
+
+      - name: Configure deployment SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/voiceguard_deploy
+          chmod 600 ~/.ssh/voiceguard_deploy
+          printf '%s\n' "$DROPLET_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Deploy the exact image that passed CI
+        run: |
+          ssh -i ~/.ssh/voiceguard_deploy -o IdentitiesOnly=yes root@"$DROPLET_HOST" \
+            "IMAGE='${REGISTRY}/voiceguard:${IMAGE_TAG}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /srv/voiceguard
+          sed -i "s|^VOICEGUARD_IMAGE=.*|VOICEGUARD_IMAGE=${IMAGE}|" .env
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d --force-recreate
+          docker compose -f docker-compose.prod.yml ps
+          BIND_IP=$(sed -n 's/^VG_BIND_IP=//p' .env)
+          curl -skf --resolve "voiceguard.internal:8443:${BIND_IP}" \
+            https://voiceguard.internal:8443/ping
+          REMOTE
