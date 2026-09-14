@@ -110,10 +110,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Do not use Ubuntu's preinstalled botocore: it is older than the
+      # checksum options configured in remote_store.py.  Keep this aligned with
+      # the CI jobs and the production image.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
       # The active v9h bundle is intentionally baked into the image.  Pull it
       # fresh here rather than relying on a workstation-only model directory.
       - name: Install bundle downloader
-        run: python -m pip install --disable-pip-version-check numpy boto3
+        run: python -m pip install --disable-pip-version-check --upgrade numpy boto3
       - name: Pull active model bundle
         run: |
           rm -f model_store/registry.jsonl
