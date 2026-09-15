@@ -44,6 +44,7 @@
         <label>Ground-truth label <select name="label"><option value="1">Fake</option><option value="0">Real</option></select></label>
         <label>Notes / provenance <textarea name="notes" maxlength="2000" placeholder="Known generator/version, licence, recording conditions…"></textarea></label>
         <label>Audio files <input name="files" type="file" multiple required accept=".mp3,.wav,.flac,.m4a,.ogg,.opus,audio/*"></label>
+        <p class="muted tiny">Large selections upload in safe groups (up to 10 files / 20 MiB per request). Each individual file must be below 24 MiB; the server's 25 MiB cap includes multipart overhead.</p>
         <button>Upload and queue evaluation</button>
       </form>
     </section>
@@ -80,6 +81,12 @@
 <script>
   const $ = id => document.getElementById(id);
   const state = { batches: [], active: null, ping: null };
+  // Caddy rejects a whole multipart request above 25 MiB.  Leave headroom for
+  // multipart framing and upload a large selection sequentially, so 50–100
+  // short clips do not depend on their combined size being below that limit.
+  const UPLOAD_GROUP_MAX_FILES = 10;
+  const UPLOAD_GROUP_MAX_BYTES = 20 * 1024 * 1024;
+  const UPLOAD_SINGLE_FILE_MAX_BYTES = 24 * 1024 * 1024;
   const message = text => $('message').textContent = text;
   const headers = () => ({Authorization: 'Bearer ' + $('key').value.trim()});
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -177,6 +184,27 @@
     } catch (error) { message('Download failed: ' + error.message); }
   }
 
+  function uploadGroups(files) {
+    const groups = [];
+    let group = [], bytes = 0;
+    for (const file of files) {
+      if (file.size > UPLOAD_SINGLE_FILE_MAX_BYTES) {
+        throw new Error(file.name + ' is larger than the practical 24 MiB dashboard file limit.');
+      }
+      // A near-limit file travels by itself. The server still enforces the
+      // definitive limit; this client grouping is a reliability measure.
+      if (group.length && (group.length >= UPLOAD_GROUP_MAX_FILES || bytes + file.size > UPLOAD_GROUP_MAX_BYTES)) {
+        groups.push(group); group = []; bytes = 0;
+      }
+      group.push(file); bytes += file.size;
+      if (file.size > UPLOAD_GROUP_MAX_BYTES) {
+        groups.push(group); group = []; bytes = 0;
+      }
+    }
+    if (group.length) groups.push(group);
+    return groups;
+  }
+
   async function refreshAll(showMessage = true) {
     try {
       const data = await Promise.all([
@@ -228,18 +256,30 @@
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const files = form.getAll('files'); form.delete('files');
+    let batch = null, uploadedCount = 0;
     try {
       message('Creating batch…');
-      const batch = await request('/admin/evaluations/api/batches', {method:'POST', body:form});
-      const upload = new FormData(); files.forEach(file => upload.append('files', file));
-      message('Uploading ' + files.length + ' file(s)…');
-      const uploaded = await request('/admin/evaluations/api/batches/' + batch.batch_id + '/files', {method:'POST', body:upload});
-      if (!uploaded.uploaded.length) throw new Error(uploaded.errors.map(item => item.error).join('; ') || 'No new files uploaded');
+      batch = await request('/admin/evaluations/api/batches', {method:'POST', body:form});
+      const groups = uploadGroups(files);
+      const uploadErrors = [], duplicates = [];
+      for (let index = 0; index < groups.length; index += 1) {
+        const upload = new FormData(); groups[index].forEach(file => upload.append('files', file));
+        message('Uploading group ' + (index + 1) + '/' + groups.length + ' (' + groups[index].length + ' file(s); ' + uploadedCount + '/' + files.length + ' stored)…');
+        const response = await request('/admin/evaluations/api/batches/' + batch.batch_id + '/files', {method:'POST', body:upload});
+        uploadedCount += response.uploaded.length;
+        duplicates.push(...response.duplicates);
+        uploadErrors.push(...response.errors);
+      }
+      if (!uploadedCount) throw new Error(uploadErrors.map(item => item.error).join('; ') || 'No new files uploaded');
       await request('/admin/evaluations/api/batches/' + batch.batch_id + '/run', {method:'POST'});
       formElement.reset();
       await refreshAll(false);
       await openBatch(batch.batch_id);
-      message('Queued ' + uploaded.uploaded.length + ' audio file(s). The batch review will show file-level evidence as scoring finishes.');
-    } catch (error) { message('Upload failed: ' + error.message); }
+      const extra = (duplicates.length ? ' ' + duplicates.length + ' duplicate(s) skipped.' : '') + (uploadErrors.length ? ' ' + uploadErrors.length + ' file(s) rejected; review their type/size.' : '');
+      message('Queued ' + uploadedCount + ' audio file(s) from ' + files.length + ' selected.' + extra + ' The review table fills as the worker scores them.');
+    } catch (error) {
+      const progress = batch && uploadedCount ? ' ' + uploadedCount + ' file(s) are safely stored in batch ' + batch.batch_id + '; do not create a duplicate batch.' : '';
+      message('Upload failed: ' + error.message + progress);
+    }
   });
 </script></body></html>
