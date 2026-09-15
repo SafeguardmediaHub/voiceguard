@@ -2,7 +2,7 @@
 """VoiceGuard V9 — FastAPI web layer over the detector core.
 Run: uvicorn api:app --host 0.0.0.0 --port 7860
 """
-import os, json, tempfile, traceback, math
+import os, json, tempfile, traceback, math, csv, io, mimetypes
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException, Form
@@ -266,6 +266,55 @@ def evaluation_batch(batch_id: str, client: dict = Depends(require_evaluation_ad
     if batch is None:
         return JSONResponse(status_code=404, content={"error": "batch not found"})
     return _json_safe(batch)
+
+
+@app.get("/admin/evaluations/api/batches/{batch_id}/hard-cases.csv")
+def evaluation_hard_cases_csv(batch_id: str, client: dict = Depends(require_evaluation_admin)):
+    """Export mistakes as a review/training-selection manifest, never as labels.
+
+    A human must still inspect provenance and consent before moving a clip into a
+    training corpus.  The CSV makes that review repeatable without silently
+    promoting candidate evaluation data into the frozen drift baseline.
+    """
+    batch = evaluations.get_batch(batch_id, include_samples=True)
+    if batch is None:
+        return JSONResponse(status_code=404, content={"error": "batch not found"})
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=[
+        "sample_id", "original_name", "ground_truth", "outcome", "verdict", "score",
+        "lcnn_pct", "aasist_pct", "w2v_pct", "rawnet_pct", "ensemble_pct", "sha256",
+    ])
+    writer.writeheader()
+    for sample in batch.get("samples", []):
+        outcome = sample.get("outcome") or {}
+        if outcome.get("correct") is not False:
+            continue
+        result = sample.get("result") or {}
+        models = result.get("model_scores") or {}
+        writer.writerow({
+            "sample_id": sample["sample_id"], "original_name": sample["original_name"],
+            "ground_truth": "fake" if batch["label"] else "real", "outcome": outcome.get("kind"),
+            "verdict": result.get("verdict"), "score": result.get("score"),
+            "lcnn_pct": models.get("lcnn"), "aasist_pct": models.get("aasist"),
+            "w2v_pct": models.get("w2v"), "rawnet_pct": models.get("rawnet"),
+            "ensemble_pct": models.get("ensemble"), "sha256": result.get("sha256"),
+        })
+    safe_name = "".join(c if c.isalnum() or c in "_.-" else "_" for c in batch["source"])
+    return PlainTextResponse(output.getvalue(), media_type="text/csv",
+                             headers={"Content-Disposition": f'attachment; filename="{safe_name}_hard_cases.csv"'})
+
+
+@app.get("/admin/evaluations/api/samples/{sample_id}/audio")
+def evaluation_sample_audio(sample_id: str, client: dict = Depends(require_evaluation_admin)):
+    """Download original labelled evidence through the admin-only API."""
+    sample = evaluations.get_sample(sample_id)
+    if sample is None:
+        return JSONResponse(status_code=404, content={"error": "sample not found"})
+    path = sample["stored_path"]
+    if not os.path.isfile(path):
+        return JSONResponse(status_code=404, content={"error": "evaluation audio is no longer available"})
+    media_type = mimetypes.guess_type(sample["original_name"])[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type, filename=sample["original_name"])
 
 
 @app.post("/admin/evaluations/api/batches", status_code=201)

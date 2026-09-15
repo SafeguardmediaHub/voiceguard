@@ -5,30 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VoiceGuard Evaluation Dashboard</title>
   <style>
-    :root { color-scheme: dark; --bg:#101827; --card:#182235; --line:#334155; --text:#e5e7eb; --muted:#9ca3af; --good:#34d399; --warn:#fbbf24; --bad:#fb7185; --blue:#60a5fa; }
+    :root { color-scheme:dark; --bg:#101827; --card:#182235; --line:#334155; --text:#e5e7eb; --muted:#9ca3af; --good:#34d399; --warn:#fbbf24; --bad:#fb7185; --blue:#60a5fa; }
     * { box-sizing:border-box; } body { margin:0; font:15px system-ui,sans-serif; color:var(--text); background:var(--bg); }
-    main { max-width:1200px; margin:0 auto; padding:28px 18px 60px; } h1 { margin:0 0 6px; } h2 { margin:0 0 14px; font-size:18px; }
-    p, .muted { color:var(--muted); } .notice { border-left:4px solid var(--warn); padding:10px 12px; background:#2b2414; margin:18px 0; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(310px,1fr)); gap:16px; } .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; }
-    label { display:block; margin:10px 0 5px; font-weight:600; } input, textarea, select, button { width:100%; padding:9px 10px; border-radius:6px; border:1px solid var(--line); color:var(--text); background:#0f172a; }
+    main { max-width:1320px; margin:0 auto; padding:28px 18px 60px; } h1 { margin:0 0 6px; } h2 { margin:0 0 14px; font-size:18px; }
+    p,.muted { color:var(--muted); } .notice { border-left:4px solid var(--warn); padding:10px 12px; background:#2b2414; margin:18px 0; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; } .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; }
+    label { display:block; margin:10px 0 5px; font-weight:600; } input,textarea,select,button { width:100%; padding:9px 10px; border-radius:6px; border:1px solid var(--line); color:var(--text); background:#0f172a; }
     textarea { min-height:70px; resize:vertical; } button { cursor:pointer; font-weight:700; background:#1d4ed8; border-color:#2563eb; margin-top:14px; } button:hover { background:#2563eb; }
     table { width:100%; border-collapse:collapse; font-size:14px; } th,td { text-align:left; padding:10px 7px; border-bottom:1px solid var(--line); vertical-align:top; } th { color:var(--muted); }
     .pill { display:inline-block; padding:2px 7px; border-radius:999px; font-size:12px; background:#243247; } .good { color:var(--good); } .warn { color:var(--warn); } .bad { color:var(--bad); }
     #message { white-space:pre-wrap; min-height:22px; } .wide { margin-top:16px; } code { color:#bfdbfe; }
+    .summary { margin:16px 0; } .metric { min-height:104px; } .metric b { display:block; font-size:28px; margin-top:9px; }
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:end; } .toolbar label { flex:1 1 230px; } .toolbar button { width:auto; padding:9px 14px; }
+    .batch-meta { color:var(--muted); margin:12px 0; white-space:pre-wrap; } .scroll { overflow-x:auto; }
+    .outcome { font-weight:700; } .false_negative,.false_positive { color:var(--bad); } .correct { color:var(--good); } .pending { color:var(--warn); }
+    .model-grid { display:grid; grid-template-columns:repeat(2,minmax(86px,1fr)); gap:3px 8px; font-size:12px; min-width:185px; }.model-grid span { color:var(--muted); }.model-grid b { color:var(--text); }
+    .tiny { font-size:12px; } .link-button { width:auto; margin:0; padding:5px 8px; font-size:12px; } .empty { color:var(--muted); }
   </style>
 </head>
 <body><main>
   <h1>VoiceGuard Evaluation Dashboard</h1>
-  <p>Upload <strong>known-labelled</strong> audio in batches, evaluate it asynchronously, and track category performance over time.</p>
-  <div class="notice">New uploads are candidate evaluations. They do not modify the frozen nightly drift baseline.</div>
+  <p>Upload <strong>known-labelled</strong> audio, evaluate it through the deployed cascade, and review exactly where it succeeds or fails.</p>
+  <div class="notice">Candidate evaluation batches never modify the frozen nightly drift baseline. Hard-case exports are review manifests, not automatic fine-tuning labels.</div>
 
   <div class="grid">
     <section class="card">
       <h2>Admin access</h2>
       <label for="key">Evaluation admin API key</label>
       <input id="key" type="password" autocomplete="off" placeholder="vg_…">
-      <p class="muted">The key is held only in this browser tab. Create it with <code>auth.py create --scope admin</code>.</p>
-      <button type="button" onclick="refreshAll()">Load dashboard</button>
+      <p class="muted">Held only in this browser tab. Create it with <code>auth.py create --scope admin</code>.</p>
+      <button type="button" id="load-dashboard">Load dashboard</button>
     </section>
     <section class="card">
       <h2>New evaluation batch</h2>
@@ -44,53 +50,196 @@
   </div>
   <p id="message" role="status"></p>
 
+  <section class="grid summary" aria-label="Evaluation overview">
+    <div class="card metric"><span class="muted">Completed batches</span><b id="total-batches">—</b></div>
+    <div class="card metric"><span class="muted">Scored clips</span><b id="scored-clips">—</b></div>
+    <div class="card metric"><span class="muted">Hard cases</span><b id="hard-cases">—</b><span class="muted tiny">False negatives + false positives</span></div>
+    <div class="card metric"><span class="muted">Active bundle</span><b id="active-bundle">—</b><span class="muted tiny">Model scores appear in each file review</span></div>
+  </section>
+
   <section class="card wide"><h2>Category performance by evaluation date</h2>
-    <table><thead><tr><th>Date</th><th>Batch</th><th>Category</th><th>Label</th><th>Usable clips</th><th>Result</th><th>Notes</th></tr></thead>
-    <tbody id="metrics"><tr><td colspan="7" class="muted">Enter the admin key, then load dashboard.</td></tr></tbody></table>
+    <div class="scroll"><table><thead><tr><th>Date</th><th>Batch</th><th>Category</th><th>Label</th><th>Usable clips</th><th>Correct / hard cases</th><th>Result</th><th>Notes</th></tr></thead>
+    <tbody id="metrics"><tr><td colspan="8" class="muted">Enter the admin key, then load dashboard.</td></tr></tbody></table></div>
   </section>
   <section class="card wide"><h2>Recent batches</h2>
-    <table><thead><tr><th>Created</th><th>Name</th><th>Source</th><th>Status</th><th>Progress</th></tr></thead>
-    <tbody id="batches"><tr><td colspan="5" class="muted">No data loaded.</td></tr></tbody></table>
+    <div class="scroll"><table><thead><tr><th>Created</th><th>Name</th><th>Source</th><th>Status</th><th>Progress</th><th></th></tr></thead>
+    <tbody id="batches"><tr><td colspan="6" class="muted">No data loaded.</td></tr></tbody></table></div>
+  </section>
+  <section class="card wide"><h2>Batch review and hard-case evidence</h2>
+    <div class="toolbar">
+      <label>Batch <select id="batch-selector"><option value="">Load the dashboard first</option></select></label>
+      <label>Show <select id="sample-filter"><option value="all">All files</option><option value="mistakes">Hard cases only</option><option value="correct">Correct only</option><option value="errors">Processing errors only</option></select></label>
+      <button type="button" id="open-batch">Open batch</button>
+      <button type="button" id="download-hard-cases">Download hard-case CSV</button>
+    </div>
+    <p id="batch-meta" class="batch-meta">Choose a batch to inspect file-level evidence. Downloads are admin-only; inspect provenance and consent before any future fine-tuning use.</p>
+    <div class="scroll"><table><thead><tr><th>File</th><th>Outcome</th><th>Final prediction</th><th>Model signals</th><th>Fusion evidence</th><th>Evidence</th></tr></thead>
+    <tbody id="samples"><tr><td colspan="6" class="muted">No batch selected.</td></tr></tbody></table></div>
   </section>
 </main>
 <script>
   const $ = id => document.getElementById(id);
+  const state = { batches: [], active: null, ping: null };
   const message = text => $('message').textContent = text;
-  const headers = () => ({Authorization: `Bearer ${$('key').value.trim()}`});
-  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const pct = n => n == null ? '—' : `${(n * 100).toFixed(1)}%`;
-  async function request(url, options={}) {
-    const r = await fetch(url, {...options, headers:{...headers(), ...(options.headers || {})}});
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.error || body.detail || `HTTP ${r.status}`);
+  const headers = () => ({Authorization: 'Bearer ' + $('key').value.trim()});
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const date = value => value ? esc(new Date(value).toLocaleString()) : '—';
+  const fraction = value => value == null ? '—' : (Number(value) * 100).toFixed(1) + '%';
+  const points = value => value == null ? '—' : Number(value).toFixed(1) + '%';
+
+  async function request(url, options = {}) {
+    const response = await fetch(url, {...options, headers:{...headers(), ...(options.headers || {})}});
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || body.detail || 'HTTP ' + response.status);
     return body;
   }
-  async function refreshAll() {
-    try {
-      const [metrics, batches] = await Promise.all([request('/admin/evaluations/api/metrics'), request('/admin/evaluations/api/batches')]);
-      $('metrics').innerHTML = metrics.metrics.length ? metrics.metrics.map(m => {
-        const result = m.label === 1 ? `Catch rate: <strong class="${m.catch_rate < .7 ? 'warn' : 'good'}">${pct(m.catch_rate)}</strong>` : `False-positive rate: <strong class="${m.false_positive_rate > .1 ? 'warn' : 'good'}">${pct(m.false_positive_rate)}</strong>`;
-        return `<tr><td>${esc(new Date(m.date).toLocaleString())}</td><td>${esc(m.name)}</td><td><span class="pill">${esc(m.source)}</span></td><td>${m.label ? 'Fake' : 'Real'}</td><td>${m.n}${m.errors ? ` (+${m.errors} errors)` : ''}</td><td>${result}</td><td>${m.small_sample ? '<span class="warn">Small sample: fewer than 30 usable clips.</span>' : ''}</td></tr>`;
-      }).join('') : '<tr><td colspan="7" class="muted">No completed candidate evaluations yet.</td></tr>';
-      $('batches').innerHTML = batches.batches.length ? batches.batches.map(b => `<tr><td>${esc(new Date(b.created_at).toLocaleString())}</td><td>${esc(b.name)}</td><td>${esc(b.source)}</td><td><span class="pill">${esc(b.status)}</span></td><td>${b.summary.done}/${b.summary.total} complete${b.summary.errors ? `, ${b.summary.errors} errors` : ''}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">No batches created yet.</td></tr>';
-      message('Dashboard updated.');
-    } catch (e) { message(`Could not load dashboard: ${e.message}`); }
+
+  function outcomeText(sample) {
+    const outcome = sample.outcome || {};
+    if (outcome.kind === 'false_negative') return '<span class="outcome false_negative">MISS — false negative</span>';
+    if (outcome.kind === 'false_positive') return '<span class="outcome false_positive">FALSE POSITIVE</span>';
+    if (outcome.kind === 'correct') return '<span class="outcome correct">Correct</span>';
+    if (outcome.kind === 'error') return '<span class="outcome false_positive">Processing error</span>';
+    return '<span class="outcome pending">Pending</span>';
   }
-  $('batch-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    const form = new FormData(e.currentTarget);
+
+  function modelSignals(result) {
+    if (!result) return '<span class="empty">No result</span>';
+    const scores = result.model_scores || {};
+    const cell = (label, value) => '<span>' + label + '</span><b>' + points(value) + '</b>';
+    const stage = result.cascade || {};
+    return '<div class="model-grid">' +
+      cell('LCNN', scores.lcnn) + cell('AASIST', scores.aasist) +
+      cell('Wav2Vec', scores.w2v) + cell('RawNet3', scores.rawnet) +
+      cell('Final', scores.ensemble) + cell('Stage-1 resolved', stage.resolution_pct) +
+      '</div>';
+  }
+
+  function fusionEvidence(result) {
+    if (!result) return '—';
+    const fusion = result.fusion_contributions;
+    if (!fusion || Object.values(fusion).every(value => value == null)) {
+      return '<span class="tiny muted">Stage 1 resolved this clip; the full XGBoost ensemble did not run.</span>';
+    }
+    const part = (name, value) => name + ': <b class="' + (Number(value) >= 0 ? 'good' : 'bad') + '">' + Number(value).toFixed(3) + '</b>';
+    const range = result.fusion_chunk_range_sec ? '<br><span class="tiny muted">Peak ensemble chunk: ' + esc(result.fusion_chunk_range_sec.join('–')) + ' sec</span>' : '';
+    return '<span class="tiny">' + part('AASIST', fusion.aasist) + '<br>' + part('Wav2Vec', fusion.wav2vec) + '<br>' + part('RawNet3', fusion.rawnet) + '<br>' + part('Base', fusion.base) + '</span>' + range;
+  }
+
+  function sampleVisible(sample) {
+    const mode = $('sample-filter').value;
+    const outcome = sample.outcome || {};
+    if (mode === 'mistakes') return outcome.correct === false;
+    if (mode === 'correct') return outcome.correct === true;
+    if (mode === 'errors') return outcome.kind === 'error';
+    return true;
+  }
+
+  function renderSamples() {
+    const body = $('samples');
+    const batch = state.active;
+    if (!batch) { body.innerHTML = '<tr><td colspan="6" class="muted">No batch selected.</td></tr>'; return; }
+    const rows = (batch.samples || []).filter(sampleVisible);
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="muted">No files match this filter.</td></tr>'; return; }
+    body.innerHTML = rows.map(sample => {
+      const result = sample.result || {};
+      const prediction = result.verdict ? '<b>' + esc(result.verdict) + '</b><br><span class="tiny">Final fake probability: ' + points(result.pct) + '</span>' : esc(sample.error || 'Not scored yet');
+      const evidence = '<button type="button" class="link-button" data-download="' + esc(sample.sample_id) + '">Download audio</button><br><span class="tiny muted">SHA: ' + esc(result.sha256 || sample.sha256 || '—') + '</span>';
+      return '<tr><td><b>' + esc(sample.original_name) + '</b><br><span class="tiny muted">' + esc(sample.sample_id) + '</span></td><td>' + outcomeText(sample) + '</td><td>' + prediction + '</td><td>' + modelSignals(result) + '</td><td>' + fusionEvidence(result) + '</td><td>' + evidence + '</td></tr>';
+    }).join('');
+  }
+
+  async function openBatch(batchId) {
+    const id = batchId || $('batch-selector').value;
+    if (!id) { message('Choose a batch first.'); return; }
+    try {
+      state.active = await request('/admin/evaluations/api/batches/' + encodeURIComponent(id));
+      $('batch-selector').value = state.active.batch_id;
+      const summary = state.active.summary || {};
+      $('batch-meta').textContent = state.active.name + ' · ' + state.active.source + ' · known ' + (state.active.label ? 'fake' : 'real') +
+        '\n' + (state.active.notes || 'No provenance notes provided.') +
+        '\nStatus: ' + state.active.status + ' · ' + summary.done + '/' + summary.total + ' scored · ' + summary.errors + ' processing errors.';
+      renderSamples();
+    } catch (error) { message('Could not open batch: ' + error.message); }
+  }
+
+  async function downloadProtected(url, filename) {
+    try {
+      const response = await fetch(url, {headers: headers()});
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || body.detail || 'HTTP ' + response.status);
+      }
+      const blob = await response.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob); link.download = filename; link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (error) { message('Download failed: ' + error.message); }
+  }
+
+  async function refreshAll(showMessage = true) {
+    try {
+      const data = await Promise.all([
+        request('/admin/evaluations/api/metrics'),
+        request('/admin/evaluations/api/batches'),
+        request('/ping')
+      ]);
+      const metrics = data[0].metrics; state.batches = data[1].batches; state.ping = data[2];
+      const total = metrics.reduce((sum, item) => sum + item.n, 0);
+      const mistakes = metrics.reduce((sum, item) => sum + item.incorrect, 0);
+      $('total-batches').textContent = metrics.length;
+      $('scored-clips').textContent = total;
+      $('hard-cases').textContent = mistakes;
+      $('active-bundle').textContent = state.ping.active_version || '—';
+      $('metrics').innerHTML = metrics.length ? metrics.map(item => {
+        const result = item.label === 1 ? 'Catch rate: <strong class="' + (item.catch_rate < .7 ? 'warn' : 'good') + '">' + fraction(item.catch_rate) + '</strong>' :
+          'False-positive rate: <strong class="' + (item.false_positive_rate > .1 ? 'warn' : 'good') + '">' + fraction(item.false_positive_rate) + '</strong>';
+        const note = (item.small_sample ? '<span class="warn">Small sample: fewer than 30 usable clips.</span>' : '') +
+          (item.incorrect ? '<br><span class="bad">' + item.incorrect + ' hard case(s): open batch to review.</span>' : '');
+        return '<tr><td>' + date(item.date) + '</td><td>' + esc(item.name) + '</td><td><span class="pill">' + esc(item.source) + '</span></td><td>' + (item.label ? 'Fake' : 'Real') + '</td><td>' + item.n + (item.errors ? ' (+' + item.errors + ' errors)' : '') + '</td><td>' + item.correct + ' / <span class="' + (item.incorrect ? 'bad' : 'good') + '">' + item.incorrect + '</span></td><td>' + result + '</td><td>' + note + '</td></tr>';
+      }).join('') : '<tr><td colspan="8" class="muted">No completed candidate evaluations yet.</td></tr>';
+      $('batches').innerHTML = state.batches.length ? state.batches.map(batch => '<tr><td>' + date(batch.created_at) + '</td><td>' + esc(batch.name) + '</td><td>' + esc(batch.source) + '</td><td><span class="pill">' + esc(batch.status) + '</span></td><td>' + batch.summary.done + '/' + batch.summary.total + ' complete' + (batch.summary.errors ? ', ' + batch.summary.errors + ' errors' : '') + '</td><td><button type="button" class="link-button" data-open="' + esc(batch.batch_id) + '">Review</button></td></tr>').join('') : '<tr><td colspan="6" class="muted">No batches created yet.</td></tr>';
+      const previous = $('batch-selector').value;
+      $('batch-selector').innerHTML = state.batches.length ? state.batches.map(batch => '<option value="' + esc(batch.batch_id) + '">' + esc(batch.name) + ' · ' + esc(batch.source) + '</option>').join('') : '<option value="">No batches yet</option>';
+      if (state.batches.some(batch => batch.batch_id === previous)) $('batch-selector').value = previous;
+      if (showMessage) message('Dashboard updated. Open a batch to inspect every file and hard case.');
+    } catch (error) { message('Could not load dashboard: ' + error.message); }
+  }
+
+  $('load-dashboard').addEventListener('click', () => refreshAll());
+  $('open-batch').addEventListener('click', () => openBatch());
+  $('sample-filter').addEventListener('change', renderSamples);
+  $('download-hard-cases').addEventListener('click', () => {
+    if (!state.active) { message('Open a batch first.'); return; }
+    downloadProtected('/admin/evaluations/api/batches/' + encodeURIComponent(state.active.batch_id) + '/hard-cases.csv', state.active.source + '_hard_cases.csv');
+  });
+  document.addEventListener('click', event => {
+    const review = event.target.closest('[data-open]');
+    const download = event.target.closest('[data-download]');
+    if (review) openBatch(review.dataset.open);
+    if (download) {
+      const sample = (state.active && state.active.samples || []).find(item => item.sample_id === download.dataset.download);
+      downloadProtected('/admin/evaluations/api/samples/' + encodeURIComponent(download.dataset.download) + '/audio', sample ? sample.original_name : 'evaluation-audio');
+    }
+  });
+
+  $('batch-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const files = form.getAll('files'); form.delete('files');
     try {
       message('Creating batch…');
       const batch = await request('/admin/evaluations/api/batches', {method:'POST', body:form});
       const upload = new FormData(); files.forEach(file => upload.append('files', file));
-      message(`Uploading ${files.length} file(s)…`);
-      const uploaded = await request(`/admin/evaluations/api/batches/${batch.batch_id}/files`, {method:'POST', body:upload});
-      if (!uploaded.uploaded.length) throw new Error(uploaded.errors.map(x => x.error).join('; ') || 'No new files uploaded');
-      await request(`/admin/evaluations/api/batches/${batch.batch_id}/run`, {method:'POST'});
-      e.currentTarget.reset();
-      message(`Queued ${uploaded.uploaded.length} audio file(s). Refresh in a moment to see progress.`);
-      await refreshAll();
-    } catch (err) { message(`Upload failed: ${err.message}`); }
+      message('Uploading ' + files.length + ' file(s)…');
+      const uploaded = await request('/admin/evaluations/api/batches/' + batch.batch_id + '/files', {method:'POST', body:upload});
+      if (!uploaded.uploaded.length) throw new Error(uploaded.errors.map(item => item.error).join('; ') || 'No new files uploaded');
+      await request('/admin/evaluations/api/batches/' + batch.batch_id + '/run', {method:'POST'});
+      formElement.reset();
+      await refreshAll(false);
+      await openBatch(batch.batch_id);
+      message('Queued ' + uploaded.uploaded.length + ' audio file(s). The batch review will show file-level evidence as scoring finishes.');
+    } catch (error) { message('Upload failed: ' + error.message); }
   });
 </script></body></html>

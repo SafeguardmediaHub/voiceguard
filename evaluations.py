@@ -290,14 +290,68 @@ def fail_sample(sample_id, error):
     _finish_sample(sample_id, error=error)
 
 
-def _row_to_sample(row, include_result=True):
+def _result_summary(result):
+    """The useful, bounded part of a detector result for the browser.
+
+    Persist the complete result for reproducibility, but never send Grad-CAM or
+    other large explainability payloads to the batch list.  These fields answer
+    the operator's actual review questions: what was predicted, how confident
+    was it, which cascade stage ran, and what each acoustic model contributed.
+    """
+    if not isinstance(result, dict):
+        return None
+    fields = ("verdict", "score", "pct", "duration", "chunks", "codec",
+              "silence_ratio", "policy", "model_version", "sha256",
+              "elapsed", "timestamp", "confidence")
+    out = {name: result.get(name) for name in fields if name in result}
+    out["model_scores"] = {name: result.get(name) for name in
+                           ("lcnn", "aasist", "w2v", "rawnet", "ensemble")}
+    out["cascade"] = result.get("cascade") or {}
+    shap = result.get("shap")
+    if isinstance(shap, dict):
+        out["fusion_contributions"] = {name: shap.get(name) for name in
+                                        ("aasist", "wav2vec", "rawnet", "base")}
+        if shap.get("chunk_range_sec") is not None:
+            out["fusion_chunk_range_sec"] = shap["chunk_range_sec"]
+    return out
+
+
+def sample_outcome(label, status, result):
+    """Classify one labelled evaluation without treating REVIEW as a real.
+
+    The deployed policy flags REVIEW/LIKELY_FAKE/AUTO_FAKE.  Therefore a fake is
+    missed only when it receives AUTO_REAL; a known-real clip is a false positive
+    whenever it is flagged by that same production policy.
+    """
+    if status != "done" or not isinstance(result, dict):
+        return {"state": status, "correct": None, "kind": "error" if status == "error" else "pending"}
+    verdict = result.get("verdict")
+    predicted_label = 0 if verdict == "AUTO_REAL" else 1
+    correct = predicted_label == int(label)
+    kind = "correct"
+    if not correct:
+        kind = "false_negative" if int(label) == 1 else "false_positive"
+    return {"state": "scored", "correct": correct, "kind": kind,
+            "predicted_label": predicted_label, "predicted": "fake" if predicted_label else "real",
+            "verdict": verdict}
+
+
+def _row_to_sample(row, label=None, include_result=True):
     d = dict(row)
-    if include_result and d.get("result_json"):
+    result = None
+    if d.get("result_json"):
         try:
-            d["result"] = json.loads(d["result_json"])
+            result = json.loads(d["result_json"])
         except json.JSONDecodeError:
-            d["result"] = None
+            result = None
+    # `stored_path` is a host-only implementation detail.  Administrators get a
+    # protected download endpoint instead of a filesystem path in browser JSON.
+    d.pop("stored_path", None)
     d.pop("result_json", None)
+    if label is not None:
+        d["outcome"] = sample_outcome(label, d.get("status"), result)
+    if include_result:
+        d["result"] = _result_summary(result)
     return d
 
 
@@ -324,7 +378,7 @@ def get_batch(batch_id, include_samples=False):
         batch["summary"] = _summary(conn, batch_id)
         if include_samples:
             rows = conn.execute("SELECT * FROM evaluation_samples WHERE batch_id=? ORDER BY created_at", (batch_id,)).fetchall()
-            batch["samples"] = [_row_to_sample(r) for r in rows]
+            batch["samples"] = [_row_to_sample(r, label=batch["label"]) for r in rows]
         return batch
     finally:
         conn.close()
@@ -341,6 +395,21 @@ def list_batches(limit=50):
             b["summary"] = _summary(conn, b["batch_id"])
             batches.append(b)
         return batches
+    finally:
+        conn.close()
+
+
+def get_sample(sample_id):
+    """Internal lookup for the protected audio-download endpoint."""
+    init_db()
+    conn = _connect()
+    try:
+        row = conn.execute("""
+            SELECT s.*, b.label, b.source, b.name AS batch_name
+            FROM evaluation_samples s JOIN evaluation_batches b ON b.batch_id=s.batch_id
+            WHERE s.sample_id=?
+        """, (sample_id,)).fetchone()
+        return dict(row) if row is not None else None
     finally:
         conn.close()
 
@@ -363,7 +432,8 @@ def metrics(limit=100):
             key = row["batch_id"]
             g = grouped.setdefault(key, {"batch_id": key, "name": row["name"], "source": row["source"],
                                          "label": row["label"], "date": row["finished_at"] or row["created_at"],
-                                         "n": 0, "errors": 0, "flagged": 0, "items": []})
+                                         "n": 0, "errors": 0, "flagged": 0, "correct": 0,
+                                         "incorrect": 0, "items": []})
             if row["status"] != "done":
                 g["errors"] += 1
                 continue
@@ -373,11 +443,13 @@ def metrics(limit=100):
                 g["errors"] += 1
                 continue
             g["n"] += 1
-            verdict = result.get("verdict")
-            flagged = verdict != "AUTO_REAL"
+            outcome = sample_outcome(row["label"], row["status"], result)
+            flagged = outcome.get("predicted_label") == 1
             g["flagged"] += int(flagged)
-            g["items"].append({"verdict": verdict, "score": result.get("score"),
-                               "flagged": flagged})
+            g["correct"] += int(outcome.get("correct") is True)
+            g["incorrect"] += int(outcome.get("correct") is False)
+            g["items"].append({"verdict": result.get("verdict"), "score": result.get("score"),
+                               "flagged": flagged, "outcome": outcome.get("kind")})
         result = []
         for group in grouped.values():
             if group["n"]:
