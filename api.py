@@ -2,13 +2,14 @@
 """VoiceGuard V9 — FastAPI web layer over the detector core.
 Run: uvicorn api:app --host 0.0.0.0 --port 7860
 """
-import os, json, tempfile, traceback, math, csv, io, mimetypes
+import os, json, tempfile, traceback, math, csv, io, mimetypes, zipfile
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.background import BackgroundTask
 
 import detector
 import auth
@@ -315,6 +316,101 @@ def evaluation_sample_audio(sample_id: str, client: dict = Depends(require_evalu
         return JSONResponse(status_code=404, content={"error": "evaluation audio is no longer available"})
     media_type = mimetypes.guess_type(sample["original_name"])[0] or "application/octet-stream"
     return FileResponse(path, media_type=media_type, filename=sample["original_name"])
+
+
+@app.post("/admin/evaluations/api/samples/{sample_id}/curation")
+def evaluation_update_curation(sample_id: str, curation_status: str = Form(...),
+                               dataset_split: str = Form(""), note: str = Form(""),
+                               client: dict = Depends(require_evaluation_admin)):
+    """Save an explicit reviewer decision; this never triggers model training."""
+    try:
+        sample = evaluations.update_curation(sample_id, curation_status, dataset_split, note)
+    except KeyError:
+        return JSONResponse(status_code=404, content={"error": "sample not found"})
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    return _json_safe(sample)
+
+
+@app.get("/admin/evaluations/api/curation-summary")
+def evaluation_curation_summary(client: dict = Depends(require_evaluation_admin)):
+    return _json_safe({"summary": evaluations.curation_summary()})
+
+
+@app.get("/admin/evaluations/api/datasets")
+def evaluation_datasets(limit: int = 50, client: dict = Depends(require_evaluation_admin)):
+    return _json_safe({"datasets": evaluations.list_dataset_revisions(limit)})
+
+
+@app.post("/admin/evaluations/api/datasets", status_code=201)
+def evaluation_create_dataset(name: str = Form(...), notes: str = Form(""),
+                              client: dict = Depends(require_evaluation_admin)):
+    try:
+        revision = evaluations.create_dataset_revision(client["key_id"], name, notes)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    return _json_safe(revision)
+
+
+def _delete_file(path):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+@app.get("/admin/evaluations/api/datasets/{revision_id}/archive")
+def evaluation_dataset_archive(revision_id: str, client: dict = Depends(require_evaluation_admin)):
+    """Build a portable, immutable dataset snapshot for an offline GPU run.
+
+    The archive is an export only: it does not train, promote, or alter the
+    deployed bundle.  Every manifest row contains the frozen revision ID and
+    SHA-256 so the GPU run can be reproduced and audited later.
+    """
+    revision, samples = evaluations.dataset_archive_entries(revision_id)
+    if revision is None:
+        return JSONResponse(status_code=404, content={"error": "dataset revision not found"})
+    fd, archive_path = tempfile.mkstemp(prefix="voiceguard-dataset-", suffix=".zip")
+    os.close(fd)
+    try:
+        manifests = {"train": [], "validation": [], "heldout": []}
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+            for sample in samples:
+                split = sample["dataset_split"]
+                manifest_split = "heldout" if split == "holdout" else split
+                safe_name = "".join(c if c.isalnum() or c in "_.-" else "_" for c in sample["original_name"])
+                archive_name = f"audio/{manifest_split}/{sample['sample_id']}_{safe_name}"
+                if os.path.isfile(sample["stored_path"]):
+                    archive.write(sample["stored_path"], archive_name)
+                else:
+                    # Do not silently manufacture a trainable archive with a missing
+                    # file.  The manifest exposes the gap so it can be corrected.
+                    archive_name = None
+                manifests[manifest_split].append({
+                    "path": archive_name,
+                    "label": sample["label"],
+                    "source": sample["source"],
+                    "sample_id": sample["sample_id"],
+                    "sha256": sample["sha256"],
+                    "curation_note": sample["curation_note"],
+                    "dataset_revision": revision_id,
+                })
+            for split, rows in manifests.items():
+                archive.writestr(f"{split}.json", json.dumps(rows, indent=2) + "\n")
+            archive.writestr("dataset_revision.json", json.dumps(revision, indent=2) + "\n")
+            archive.writestr("README.txt", (
+                "VoiceGuard curated dataset export\n\n"
+                f"Revision: {revision_id}\n"
+                "This export does NOT train or promote a model. Keep heldout.json out of training and "
+                "use it only for final certification. Verify each file SHA-256 before a GPU run.\n"
+            ))
+    except Exception:
+        _delete_file(archive_path)
+        raise
+    safe_name = revision["name"]
+    return FileResponse(archive_path, media_type="application/zip",
+                        filename=f"voiceguard_{safe_name}_{revision_id}.zip",
+                        background=BackgroundTask(_delete_file, archive_path))
 
 
 @app.post("/admin/evaluations/api/batches", status_code=201)

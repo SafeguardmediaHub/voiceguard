@@ -21,12 +21,13 @@
     .outcome { font-weight:700; } .false_negative,.false_positive { color:var(--bad); } .correct { color:var(--good); } .pending { color:var(--warn); }
     .model-grid { display:grid; grid-template-columns:repeat(2,minmax(86px,1fr)); gap:3px 8px; font-size:12px; min-width:185px; }.model-grid span { color:var(--muted); }.model-grid b { color:var(--text); }
     .tiny { font-size:12px; } .link-button { width:auto; margin:0; padding:5px 8px; font-size:12px; } .empty { color:var(--muted); }
+    .curation { min-width:210px; } .curation select, .curation textarea { font-size:12px; padding:5px; margin:0 0 5px; width:100%; } .curation textarea { min-height:45px; } .dataset-summary { margin:8px 0 14px; color:var(--muted); }
   </style>
 </head>
 <body><main>
   <h1>VoiceGuard Evaluation Dashboard</h1>
   <p>Upload <strong>known-labelled</strong> audio, evaluate it through the deployed cascade, and review exactly where it succeeds or fails.</p>
-  <div class="notice">Candidate evaluation batches never modify the frozen nightly drift baseline. Hard-case exports are review manifests, not automatic fine-tuning labels.</div>
+  <div class="notice">Candidate evaluation batches never modify the frozen nightly drift baseline. Review each clip before it enters a versioned training export; exports never automatically fine-tune or promote a model.</div>
 
   <div class="grid">
     <section class="card">
@@ -66,7 +67,18 @@
     <div class="scroll"><table><thead><tr><th>Created</th><th>Name</th><th>Source</th><th>Status</th><th>Progress</th><th></th></tr></thead>
     <tbody id="batches"><tr><td colspan="6" class="muted">No data loaded.</td></tr></tbody></table></div>
   </section>
-  <section class="card wide"><h2>Batch review and hard-case evidence</h2>
+  <section class="card wide"><h2>Curated training dataset revisions</h2>
+    <p class="muted">Use <strong>Training</strong> only for reviewed, consented clips. Put independent clips in <strong>Validation</strong> or <strong>Holdout only</strong>; holdout audio is exported separately and must never be used for fitting or threshold tuning.</p>
+    <p id="curation-summary" class="dataset-summary">Load the dashboard to see reviewed-clip counts.</p>
+    <form id="dataset-form" class="toolbar">
+      <label>Revision name <input name="name" required pattern="[a-z0-9][a-z0-9_.\-]{0,79}" placeholder="curated_2026_09_r1"></label>
+      <label>Dataset notes <input name="notes" maxlength="2000" placeholder="Consent, balancing plan, reviewer rationale"></label>
+      <button type="submit">Create immutable dataset export</button>
+    </form>
+    <div class="scroll"><table><thead><tr><th>Created</th><th>Revision</th><th>Composition</th><th>Notes</th><th>Export</th></tr></thead>
+    <tbody id="datasets"><tr><td colspan="5" class="muted">No dataset revisions created yet.</td></tr></tbody></table></div>
+  </section>
+  <section class="card wide"><h2>Batch review, curation, and hard-case evidence</h2>
     <div class="toolbar">
       <label>Batch <select id="batch-selector"><option value="">Load the dashboard first</option></select></label>
       <label>Show <select id="sample-filter"><option value="all">All files</option><option value="mistakes">Hard cases only</option><option value="correct">Correct only</option><option value="errors">Processing errors only</option></select></label>
@@ -74,13 +86,13 @@
       <button type="button" id="download-hard-cases">Download hard-case CSV</button>
     </div>
     <p id="batch-meta" class="batch-meta">Choose a batch to inspect file-level evidence. Downloads are admin-only; inspect provenance and consent before any future fine-tuning use.</p>
-    <div class="scroll"><table><thead><tr><th>File</th><th>Outcome</th><th>Final prediction</th><th>Model signals</th><th>Fusion evidence</th><th>Evidence</th></tr></thead>
-    <tbody id="samples"><tr><td colspan="6" class="muted">No batch selected.</td></tr></tbody></table></div>
+    <div class="scroll"><table><thead><tr><th>File</th><th>Outcome</th><th>Final prediction</th><th>Model signals</th><th>Fusion evidence</th><th>Reviewer decision</th><th>Evidence</th></tr></thead>
+    <tbody id="samples"><tr><td colspan="7" class="muted">No batch selected.</td></tr></tbody></table></div>
   </section>
 </main>
 <script>
   const $ = id => document.getElementById(id);
-  const state = { batches: [], active: null, ping: null };
+  const state = { batches: [], active: null, ping: null, datasets: [], curation: null };
   // Caddy rejects a whole multipart request above 25 MiB.  Leave headroom for
   // multipart framing and upload a large selection sequentially, so 50–100
   // short clips do not depend on their combined size being below that limit.
@@ -142,17 +154,40 @@
     return true;
   }
 
+  function selected(value, expected) { return value === expected ? ' selected' : ''; }
+
+  function curationControls(sample) {
+    if (sample.status !== 'done') return '<span class="tiny muted">Available after successful scoring.</span>';
+    const status = sample.curation_status || 'needs_label_review';
+    const split = sample.dataset_split || '';
+    return '<div class="curation">' +
+      '<select data-curation-status="' + esc(sample.sample_id) + '" aria-label="Curation decision for ' + esc(sample.original_name) + '">' +
+        '<option value="needs_label_review"' + selected(status, 'needs_label_review') + '>Needs label / consent review</option>' +
+        '<option value="approved_for_training"' + selected(status, 'approved_for_training') + '>Approved for training</option>' +
+        '<option value="holdout_only"' + selected(status, 'holdout_only') + '>Holdout only — never train</option>' +
+        '<option value="rejected"' + selected(status, 'rejected') + '>Rejected — do not export</option>' +
+      '</select>' +
+      '<select data-curation-split="' + esc(sample.sample_id) + '" aria-label="Dataset split for ' + esc(sample.original_name) + '">' +
+        '<option value=""' + selected(split, '') + '>No dataset split</option>' +
+        '<option value="train"' + selected(split, 'train') + '>Training split</option>' +
+        '<option value="validation"' + selected(split, 'validation') + '>Validation split</option>' +
+        '<option value="holdout"' + selected(split, 'holdout') + '>Holdout split</option>' +
+      '</select>' +
+      '<textarea data-curation-note="' + esc(sample.sample_id) + '" maxlength="2000" placeholder="Why include / exclude; consent and provenance review">' + esc(sample.curation_note || '') + '</textarea>' +
+      '<button type="button" class="link-button" data-save-curation="' + esc(sample.sample_id) + '">Save review</button></div>';
+  }
+
   function renderSamples() {
     const body = $('samples');
     const batch = state.active;
-    if (!batch) { body.innerHTML = '<tr><td colspan="6" class="muted">No batch selected.</td></tr>'; return; }
+    if (!batch) { body.innerHTML = '<tr><td colspan="7" class="muted">No batch selected.</td></tr>'; return; }
     const rows = (batch.samples || []).filter(sampleVisible);
-    if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="muted">No files match this filter.</td></tr>'; return; }
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No files match this filter.</td></tr>'; return; }
     body.innerHTML = rows.map(sample => {
       const result = sample.result || {};
       const prediction = result.verdict ? '<b>' + esc(result.verdict) + '</b><br><span class="tiny">Final fake probability: ' + points(result.pct) + '</span>' : esc(sample.error || 'Not scored yet');
       const evidence = '<button type="button" class="link-button" data-download="' + esc(sample.sample_id) + '">Download audio</button><br><span class="tiny muted">SHA: ' + esc(result.sha256 || sample.sha256 || '—') + '</span>';
-      return '<tr><td><b>' + esc(sample.original_name) + '</b><br><span class="tiny muted">' + esc(sample.sample_id) + '</span></td><td>' + outcomeText(sample) + '</td><td>' + prediction + '</td><td>' + modelSignals(result) + '</td><td>' + fusionEvidence(result) + '</td><td>' + evidence + '</td></tr>';
+      return '<tr><td><b>' + esc(sample.original_name) + '</b><br><span class="tiny muted">' + esc(sample.sample_id) + '</span></td><td>' + outcomeText(sample) + '</td><td>' + prediction + '</td><td>' + modelSignals(result) + '</td><td>' + fusionEvidence(result) + '</td><td>' + curationControls(sample) + '</td><td>' + evidence + '</td></tr>';
     }).join('');
   }
 
@@ -210,15 +245,28 @@
       const data = await Promise.all([
         request('/admin/evaluations/api/metrics'),
         request('/admin/evaluations/api/batches'),
-        request('/ping')
+        request('/ping'),
+        request('/admin/evaluations/api/curation-summary'),
+        request('/admin/evaluations/api/datasets')
       ]);
       const metrics = data[0].metrics; state.batches = data[1].batches; state.ping = data[2];
+      state.curation = data[3].summary; state.datasets = data[4].datasets;
       const total = metrics.reduce((sum, item) => sum + item.n, 0);
       const mistakes = metrics.reduce((sum, item) => sum + item.incorrect, 0);
       $('total-batches').textContent = metrics.length;
       $('scored-clips').textContent = total;
       $('hard-cases').textContent = mistakes;
       $('active-bundle').textContent = state.ping.active_version || '—';
+      const c = state.curation || {};
+      $('curation-summary').innerHTML = '<strong>' + (c.needs_label_review || 0) + '</strong> awaiting review · ' +
+        '<strong>' + (c.train || 0) + '</strong> train · <strong>' + (c.validation || 0) + '</strong> validation · ' +
+        '<strong>' + (c.holdout || 0) + '</strong> holdout · <strong>' + (c.rejected || 0) + '</strong> rejected.';
+      $('datasets').innerHTML = state.datasets.length ? state.datasets.map(dataset => {
+        const s = dataset.summary || {};
+        return '<tr><td>' + date(dataset.created_at) + '</td><td><b>' + esc(dataset.name) + '</b><br><span class="tiny muted">' + esc(dataset.revision_id) + '</span></td>' +
+          '<td>' + (s.total || 0) + ' clips · ' + (s.real || 0) + ' real / ' + (s.fake || 0) + ' fake<br><span class="tiny muted">' + (s.train || 0) + ' train · ' + (s.validation || 0) + ' validation · ' + (s.holdout || 0) + ' held out</span></td>' +
+          '<td class="tiny">' + esc(dataset.notes || '—') + '</td><td><button type="button" class="link-button" data-dataset-download="' + esc(dataset.revision_id) + '">Download ZIP</button></td></tr>';
+      }).join('') : '<tr><td colspan="5" class="muted">No immutable dataset revisions created yet. Review clips above, then create one deliberately.</td></tr>';
       $('metrics').innerHTML = metrics.length ? metrics.map(item => {
         const result = item.label === 1 ? 'Catch rate: <strong class="' + (item.catch_rate < .7 ? 'warn' : 'good') + '">' + fraction(item.catch_rate) + '</strong>' :
           'False-positive rate: <strong class="' + (item.false_positive_rate > .1 ? 'warn' : 'good') + '">' + fraction(item.false_positive_rate) + '</strong>';
@@ -244,11 +292,45 @@
   document.addEventListener('click', event => {
     const review = event.target.closest('[data-open]');
     const download = event.target.closest('[data-download]');
+    const datasetDownload = event.target.closest('[data-dataset-download]');
+    const saveCuration = event.target.closest('[data-save-curation]');
     if (review) openBatch(review.dataset.open);
     if (download) {
       const sample = (state.active && state.active.samples || []).find(item => item.sample_id === download.dataset.download);
       downloadProtected('/admin/evaluations/api/samples/' + encodeURIComponent(download.dataset.download) + '/audio', sample ? sample.original_name : 'evaluation-audio');
     }
+    if (datasetDownload) {
+      const dataset = state.datasets.find(item => item.revision_id === datasetDownload.dataset.datasetDownload);
+      downloadProtected('/admin/evaluations/api/datasets/' + encodeURIComponent(datasetDownload.dataset.datasetDownload) + '/archive',
+        dataset ? 'voiceguard_' + dataset.name + '_' + dataset.revision_id + '.zip' : 'voiceguard_dataset.zip');
+    }
+    if (saveCuration) saveCurationDecision(saveCuration.dataset.saveCuration);
+  });
+
+  async function saveCurationDecision(sampleId) {
+    const status = document.querySelector('[data-curation-status="' + CSS.escape(sampleId) + '"]');
+    const split = document.querySelector('[data-curation-split="' + CSS.escape(sampleId) + '"]');
+    const note = document.querySelector('[data-curation-note="' + CSS.escape(sampleId) + '"]');
+    if (!status || !split || !note) return;
+    try {
+      const form = new FormData();
+      form.set('curation_status', status.value); form.set('dataset_split', split.value); form.set('note', note.value);
+      await request('/admin/evaluations/api/samples/' + encodeURIComponent(sampleId) + '/curation', {method:'POST', body:form});
+      await refreshAll(false);
+      if (state.active) await openBatch(state.active.batch_id);
+      message('Reviewer decision saved. A future model change still requires offline evaluation and explicit promotion.');
+    } catch (error) { message('Could not save review: ' + error.message); }
+  }
+
+  $('dataset-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    try {
+      const dataset = await request('/admin/evaluations/api/datasets', {method:'POST', body:new FormData(formElement)});
+      formElement.reset();
+      await refreshAll(false);
+      message('Dataset revision ' + dataset.name + ' created. Download its ZIP for an offline GPU run; heldout.json must remain untouched until final certification.');
+    } catch (error) { message('Could not create dataset revision: ' + error.message); }
   });
 
   $('batch-form').addEventListener('submit', async event => {

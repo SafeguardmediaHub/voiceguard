@@ -17,6 +17,9 @@ from pathlib import Path
 
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".opus"}
 SOURCE_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,79}$")
+DATASET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,79}$")
+CURATION_STATUSES = {"needs_label_review", "approved_for_training", "holdout_only", "rejected"}
+DATASET_SPLITS = {"train", "validation", "holdout"}
 
 
 def _now():
@@ -85,10 +88,43 @@ def init_db():
                 result_json TEXT,
                 error TEXT
             )""")
+        # The first dashboard release already created this table in production.
+        # Keep upgrades additive so deploying the dashboard never discards past
+        # evaluation evidence.
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(evaluation_samples)")}
+        if "curation_status" not in columns:
+            conn.execute("ALTER TABLE evaluation_samples ADD COLUMN curation_status TEXT NOT NULL DEFAULT 'needs_label_review'")
+        if "curation_note" not in columns:
+            conn.execute("ALTER TABLE evaluation_samples ADD COLUMN curation_note TEXT NOT NULL DEFAULT ''")
+        if "dataset_split" not in columns:
+            conn.execute("ALTER TABLE evaluation_samples ADD COLUMN dataset_split TEXT")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS training_dataset_revisions (
+                revision_id TEXT PRIMARY KEY,
+                owner_key_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )""")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS training_dataset_samples (
+                revision_id TEXT NOT NULL REFERENCES training_dataset_revisions(revision_id),
+                sample_id TEXT NOT NULL REFERENCES evaluation_samples(sample_id),
+                dataset_split TEXT NOT NULL CHECK(dataset_split IN ('train','validation','holdout')),
+                original_name TEXT NOT NULL,
+                stored_path TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                label INTEGER NOT NULL CHECK(label IN (0,1)),
+                source TEXT NOT NULL,
+                curation_note TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (revision_id, sample_id)
+            )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_samples_status "
                      "ON evaluation_samples(status, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_samples_batch "
                      "ON evaluation_samples(batch_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_dataset_samples_revision "
+                     "ON training_dataset_samples(revision_id, dataset_split)")
         conn.commit()
     finally:
         conn.close()
@@ -410,6 +446,189 @@ def get_sample(sample_id):
             WHERE s.sample_id=?
         """, (sample_id,)).fetchone()
         return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def _clean_dataset_name(name):
+    name = (name or "").strip().lower()
+    if not DATASET_NAME_RE.fullmatch(name):
+        raise ValueError("dataset name must be 1-80 lowercase characters: a-z, 0-9, '.', '_' or '-'")
+    return name
+
+
+def update_curation(sample_id, curation_status, dataset_split=None, note=""):
+    """Record an explicit human decision about a completed evaluation clip.
+
+    Nothing is implicitly selected because it was a mistake.  A reviewer decides
+    whether a clip is fit for training, held out for future certification, or
+    rejected.  This protects against accidental leakage from the dashboard into a
+    model update.
+    """
+    init_db()
+    curation_status = (curation_status or "").strip()
+    if curation_status not in CURATION_STATUSES:
+        raise ValueError("unknown curation status")
+    note = (note or "").strip()[:2000]
+    dataset_split = (dataset_split or "").strip() or None
+    if curation_status == "approved_for_training":
+        if dataset_split not in {"train", "validation"}:
+            raise ValueError("approved training clips must be assigned to train or validation")
+    elif curation_status == "holdout_only":
+        dataset_split = "holdout"
+    else:
+        dataset_split = None
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT status FROM evaluation_samples WHERE sample_id=?", (sample_id,)).fetchone()
+        if row is None:
+            raise KeyError("sample not found")
+        if row["status"] != "done":
+            raise ValueError("only successfully scored clips can be curated")
+        conn.execute("""
+            UPDATE evaluation_samples
+            SET curation_status=?, dataset_split=?, curation_note=?
+            WHERE sample_id=?
+        """, (curation_status, dataset_split, note, sample_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return get_sample_public(sample_id)
+
+
+def get_sample_public(sample_id):
+    """Dashboard-safe single-sample representation, without host file paths."""
+    init_db()
+    conn = _connect()
+    try:
+        row = conn.execute("""
+            SELECT s.*, b.label FROM evaluation_samples s
+            JOIN evaluation_batches b ON b.batch_id=s.batch_id
+            WHERE s.sample_id=?
+        """, (sample_id,)).fetchone()
+        if row is None:
+            return None
+        return _row_to_sample(row, label=row["label"])
+    finally:
+        conn.close()
+
+
+def curation_summary():
+    """Counts reviewers can use before sealing a reproducible dataset revision."""
+    init_db()
+    conn = _connect()
+    try:
+        rows = conn.execute("""
+            SELECT curation_status, dataset_split, COUNT(*) AS n
+            FROM evaluation_samples WHERE status='done'
+            GROUP BY curation_status, dataset_split
+        """).fetchall()
+        counts = {"needs_label_review": 0, "approved_for_training": 0,
+                  "holdout_only": 0, "rejected": 0,
+                  "train": 0, "validation": 0, "holdout": 0}
+        for row in rows:
+            counts[row["curation_status"]] += row["n"]
+            if row["dataset_split"]:
+                counts[row["dataset_split"]] += row["n"]
+        return counts
+    finally:
+        conn.close()
+
+
+def create_dataset_revision(owner_key_id, name, notes=""):
+    """Snapshot explicitly curated clips for a repeatable offline training run."""
+    init_db()
+    name = _clean_dataset_name(name)
+    notes = (notes or "").strip()[:2000]
+    revision_id = "ds_" + secrets.token_hex(8)
+    conn = _connect()
+    try:
+        selected = conn.execute("""
+            SELECT s.sample_id, s.original_name, s.stored_path, s.sha256,
+                   s.dataset_split, s.curation_note, b.label, b.source
+            FROM evaluation_samples s JOIN evaluation_batches b ON b.batch_id=s.batch_id
+            WHERE s.status='done'
+              AND s.curation_status IN ('approved_for_training','holdout_only')
+              AND s.dataset_split IN ('train','validation','holdout')
+            ORDER BY s.dataset_split, b.source, s.created_at
+        """).fetchall()
+        if not selected:
+            raise ValueError("approve at least one scored clip for training or holdout before creating a dataset")
+        conn.execute("""
+            INSERT INTO training_dataset_revisions (revision_id, owner_key_id, name, notes, created_at)
+            VALUES (?,?,?,?,?)
+        """, (revision_id, owner_key_id, name, notes, _now()))
+        conn.executemany("""
+            INSERT INTO training_dataset_samples
+            (revision_id, sample_id, dataset_split, original_name, stored_path, sha256, label, source, curation_note)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, [(revision_id, row["sample_id"], row["dataset_split"], row["original_name"],
+                row["stored_path"], row["sha256"], row["label"], row["source"], row["curation_note"])
+               for row in selected])
+        conn.commit()
+    finally:
+        conn.close()
+    return get_dataset_revision(revision_id)
+
+
+def _dataset_summary(conn, revision_id):
+    rows = conn.execute("SELECT dataset_split, label, COUNT(*) AS n FROM training_dataset_samples "
+                        "WHERE revision_id=? GROUP BY dataset_split, label", (revision_id,)).fetchall()
+    summary = {"total": 0, "train": 0, "validation": 0, "holdout": 0,
+               "real": 0, "fake": 0}
+    for row in rows:
+        summary["total"] += row["n"]
+        summary[row["dataset_split"]] += row["n"]
+        summary["fake" if row["label"] else "real"] += row["n"]
+    return summary
+
+
+def get_dataset_revision(revision_id, include_samples=False):
+    init_db()
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT * FROM training_dataset_revisions WHERE revision_id=?", (revision_id,)).fetchone()
+        if row is None:
+            return None
+        revision = dict(row)
+        revision["summary"] = _dataset_summary(conn, revision_id)
+        if include_samples:
+            rows = conn.execute("""
+                SELECT sample_id, dataset_split, original_name, sha256, label, source, curation_note
+                FROM training_dataset_samples WHERE revision_id=?
+                ORDER BY dataset_split, source, original_name
+            """, (revision_id,)).fetchall()
+            revision["samples"] = [dict(r) for r in rows]
+        return revision
+    finally:
+        conn.close()
+
+
+def list_dataset_revisions(limit=50):
+    init_db()
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT * FROM training_dataset_revisions ORDER BY created_at DESC LIMIT ?",
+                            (max(1, min(int(limit), 200)),)).fetchall()
+        return [dict(row, summary=_dataset_summary(conn, row["revision_id"])) for row in rows]
+    finally:
+        conn.close()
+
+
+def dataset_archive_entries(revision_id):
+    """Internal archive inputs.  Paths never cross the browser API boundary."""
+    init_db()
+    conn = _connect()
+    try:
+        revision = get_dataset_revision(revision_id)
+        if revision is None:
+            return None, []
+        rows = conn.execute("""
+            SELECT sample_id, dataset_split, original_name, stored_path, sha256, label, source, curation_note
+            FROM training_dataset_samples WHERE revision_id=?
+            ORDER BY dataset_split, source, original_name
+        """, (revision_id,)).fetchall()
+        return revision, [dict(row) for row in rows]
     finally:
         conn.close()
 
