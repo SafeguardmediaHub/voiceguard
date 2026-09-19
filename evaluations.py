@@ -349,6 +349,12 @@ def _result_summary(result):
                                         ("aasist", "wav2vec", "rawnet", "base")}
         if shap.get("chunk_range_sec") is not None:
             out["fusion_chunk_range_sec"] = shap["chunk_range_sec"]
+    adversarial = result.get("adversarial")
+    if isinstance(adversarial, dict):
+        # The monitor is advisory. Its confidence is attack-risk evidence, not a
+        # fakeness probability, so retain the threshold and flag for clear UI copy.
+        out["adversarial_risk"] = {name: adversarial.get(name) for name in
+                                   ("flag", "confidence", "threshold", "latency_ms")}
     return out
 
 
@@ -372,6 +378,66 @@ def sample_outcome(label, status, result):
             "verdict": verdict}
 
 
+def hard_case_guidance(label, status, result):
+    """Give bounded, evidence-based review guidance for a labelled clip.
+
+    This deliberately recommends the *next investigation*, not an automatic model
+    update. A single clip is never enough evidence to choose a fine-tuning target;
+    the reviewer still needs a balanced dataset and an untouched held-out set.
+    """
+    outcome = sample_outcome(label, status, result)
+    if outcome["correct"] is not False:
+        return {"kind": "none", "summary": "No hard-case training recommendation for this correctly handled clip."}
+    if not isinstance(result, dict):
+        return {"kind": "unavailable", "summary": "No model evidence is available; review the processing error before curating this clip."}
+
+    cascade = result.get("cascade") or {}
+    if cascade.get("stage2_chunks") == 0:
+        return {
+            "kind": "stage1", "summary": "This hard case was resolved at cascade stage 1, so AASIST, Wav2Vec2, RawNet3, and fusion were not run.",
+            "next_step": "First review LCNN screening thresholds and collect a balanced set from this category; do not attribute this clip to a stage-2 model.",
+        }
+
+    scores = {"AASIST": result.get("aasist"), "Wav2Vec2": result.get("w2v"), "RawNet3": result.get("rawnet")}
+    usable = {}
+    for name, value in scores.items():
+        try:
+            usable[name] = float(value)
+        except (TypeError, ValueError):
+            continue
+    if not usable:
+        return {
+            "kind": "incomplete", "summary": "The clip reached stage 2, but component-level scores were unavailable.",
+            "next_step": "Re-run this category and investigate the execution record before choosing any fine-tuning work.",
+        }
+
+    strongest_name, strongest_score = max(usable.items(), key=lambda item: item[1])
+    weakest_name, weakest_score = min(usable.items(), key=lambda item: item[1])
+    if label == 1 and strongest_score >= 50:
+        return {
+            "kind": "fusion_disagreement",
+            "summary": f"Known fake was missed, although {strongest_name} gave the strongest fake signal ({strongest_score:.1f}%).",
+            "next_step": "Check fusion calibration and decision thresholds across a balanced category-level set before fine-tuning one component.",
+        }
+    if label == 0 and weakest_score < 50:
+        return {
+            "kind": "component_disagreement",
+            "summary": f"Known real was flagged while {weakest_name} was closest to real ({weakest_score:.1f}% fake probability).",
+            "next_step": "Inspect component disagreement and fusion calibration on more representative real recordings before retraining a single model.",
+        }
+    if label == 1:
+        return {
+            "kind": "category_gap",
+            "summary": f"Known fake was missed; executed components were consistently low (strongest: {strongest_name} {strongest_score:.1f}%).",
+            "next_step": "Treat this as a category-coverage candidate: collect balanced confirmed examples, then compare component fine-tuning against fusion-only recalibration on held-out data.",
+        }
+    return {
+        "kind": "real_domain_shift",
+        "summary": f"Known real was flagged; executed components leaned fake (weakest: {weakest_name} {weakest_score:.1f}%).",
+        "next_step": "Treat this as a real-domain coverage issue first: add comparable real recordings and assess false positives before changing model weights or thresholds.",
+    }
+
+
 def _row_to_sample(row, label=None, include_result=True):
     d = dict(row)
     result = None
@@ -386,6 +452,7 @@ def _row_to_sample(row, label=None, include_result=True):
     d.pop("result_json", None)
     if label is not None:
         d["outcome"] = sample_outcome(label, d.get("status"), result)
+        d["guidance"] = hard_case_guidance(label, d.get("status"), result)
     if include_result:
         d["result"] = _result_summary(result)
     return d

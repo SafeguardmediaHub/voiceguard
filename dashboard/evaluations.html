@@ -22,6 +22,7 @@
     .model-grid { display:grid; grid-template-columns:repeat(2,minmax(86px,1fr)); gap:3px 8px; font-size:12px; min-width:185px; }.model-grid span { color:var(--muted); }.model-grid b { color:var(--text); }
     .tiny { font-size:12px; } .link-button { width:auto; margin:0; padding:5px 8px; font-size:12px; } .empty { color:var(--muted); }
     .curation { min-width:210px; } .curation select, .curation textarea { font-size:12px; padding:5px; margin:0 0 5px; width:100%; } .curation textarea { min-height:45px; } .dataset-summary { margin:8px 0 14px; color:var(--muted); }
+    .diagnostic { min-width:265px; max-width:340px; font-size:12px; line-height:1.42; } .diagnostic b { color:#dbeafe; } .risk { display:inline-block; margin-top:5px; padding:3px 6px; border-radius:6px; background:#243247; font-size:12px; } audio { display:block; width:210px; max-width:100%; margin-top:6px; }
   </style>
 </head>
 <body><main>
@@ -86,8 +87,8 @@
       <button type="button" id="download-hard-cases">Download hard-case CSV</button>
     </div>
     <p id="batch-meta" class="batch-meta">Choose a batch to inspect file-level evidence. Downloads are admin-only; inspect provenance and consent before any future fine-tuning use.</p>
-    <div class="scroll"><table><thead><tr><th>File</th><th>Outcome</th><th>Final prediction</th><th>Model signals</th><th>Fusion evidence</th><th>Reviewer decision</th><th>Evidence</th></tr></thead>
-    <tbody id="samples"><tr><td colspan="7" class="muted">No batch selected.</td></tr></tbody></table></div>
+    <div class="scroll"><table><thead><tr><th>File</th><th>Outcome</th><th>Final prediction &amp; adversarial risk</th><th>Model signals</th><th>Fusion evidence</th><th>Diagnostic guidance</th><th>Reviewer decision</th><th>Evidence &amp; playback</th></tr></thead>
+    <tbody id="samples"><tr><td colspan="8" class="muted">No batch selected.</td></tr></tbody></table></div>
   </section>
 </main>
 <script>
@@ -145,6 +146,28 @@
     return '<span class="tiny">' + part('AASIST', fusion.aasist) + '<br>' + part('Wav2Vec', fusion.wav2vec) + '<br>' + part('RawNet3', fusion.rawnet) + '<br>' + part('Base', fusion.base) + '</span>' + range;
   }
 
+  function adversarialRisk(result) {
+    const risk = result && result.adversarial_risk;
+    if (!risk || risk.confidence == null) return '<span class="tiny muted">Adversarial risk unavailable for this evaluation.</span>';
+    const pct = Number(risk.confidence) * 100;
+    const threshold = risk.threshold == null ? null : Number(risk.threshold) * 100;
+    const suspected = risk.flag === 'attack_suspected';
+    const klass = suspected ? 'bad' : (pct >= 20 ? 'warn' : 'good');
+    const label = suspected ? 'attack suspected' : 'no attack flag';
+    const thresholdText = threshold == null ? '' : ' · alert threshold ' + threshold.toFixed(1) + '%';
+    return '<span class="risk ' + klass + '">Adversarial risk: <b>' + pct.toFixed(1) + '%</b> · ' + esc(label) + thresholdText + '</span>' +
+      '<br><span class="tiny muted">This is attack-risk evidence, not fake probability.</span>';
+  }
+
+  function diagnosticGuidance(sample) {
+    const guidance = sample.guidance || {};
+    if (guidance.kind === 'none') return '<span class="tiny muted">No action suggested. Keep correctly handled clips only when they improve category balance.</span>';
+    if (!guidance.summary) return '<span class="tiny muted">Diagnostic guidance becomes available after scoring.</span>';
+    return '<div class="diagnostic"><b>' + esc(guidance.summary) + '</b>' +
+      (guidance.next_step ? '<br><span class="muted">Next investigation: ' + esc(guidance.next_step) + '</span>' : '') +
+      '<br><span class="tiny muted">Advisory only — confirm with a balanced set and untouched holdout data.</span></div>';
+  }
+
   function sampleVisible(sample) {
     const mode = $('sample-filter').value;
     const outcome = sample.outcome || {};
@@ -180,14 +203,14 @@
   function renderSamples() {
     const body = $('samples');
     const batch = state.active;
-    if (!batch) { body.innerHTML = '<tr><td colspan="7" class="muted">No batch selected.</td></tr>'; return; }
+    if (!batch) { body.innerHTML = '<tr><td colspan="8" class="muted">No batch selected.</td></tr>'; return; }
     const rows = (batch.samples || []).filter(sampleVisible);
-    if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No files match this filter.</td></tr>'; return; }
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No files match this filter.</td></tr>'; return; }
     body.innerHTML = rows.map(sample => {
       const result = sample.result || {};
-      const prediction = result.verdict ? '<b>' + esc(result.verdict) + '</b><br><span class="tiny">Final fake probability: ' + points(result.pct) + '</span>' : esc(sample.error || 'Not scored yet');
-      const evidence = '<button type="button" class="link-button" data-download="' + esc(sample.sample_id) + '">Download audio</button><br><span class="tiny muted">SHA: ' + esc(result.sha256 || sample.sha256 || '—') + '</span>';
-      return '<tr><td><b>' + esc(sample.original_name) + '</b><br><span class="tiny muted">' + esc(sample.sample_id) + '</span></td><td>' + outcomeText(sample) + '</td><td>' + prediction + '</td><td>' + modelSignals(result) + '</td><td>' + fusionEvidence(result) + '</td><td>' + curationControls(sample) + '</td><td>' + evidence + '</td></tr>';
+      const prediction = result.verdict ? '<b>' + esc(result.verdict) + '</b><br><span class="tiny">Final fake probability: ' + points(result.pct) + '</span><br>' + adversarialRisk(result) : esc(sample.error || 'Not scored yet');
+      const evidence = '<button type="button" class="link-button" data-play="' + esc(sample.sample_id) + '">Load / play audio</button><audio controls preload="none" data-player="' + esc(sample.sample_id) + '"></audio><button type="button" class="link-button" data-download="' + esc(sample.sample_id) + '">Download audio</button><br><span class="tiny muted">SHA: ' + esc(result.sha256 || sample.sha256 || '—') + '</span>';
+      return '<tr><td><b>' + esc(sample.original_name) + '</b><br><span class="tiny muted">' + esc(sample.sample_id) + '</span></td><td>' + outcomeText(sample) + '</td><td>' + prediction + '</td><td>' + modelSignals(result) + '</td><td>' + fusionEvidence(result) + '</td><td>' + diagnosticGuidance(sample) + '</td><td>' + curationControls(sample) + '</td><td>' + evidence + '</td></tr>';
     }).join('');
   }
 
@@ -217,6 +240,27 @@
       link.href = URL.createObjectURL(blob); link.download = filename; link.click();
       URL.revokeObjectURL(link.href);
     } catch (error) { message('Download failed: ' + error.message); }
+  }
+
+  async function playProtectedAudio(sampleId) {
+    const player = document.querySelector('[data-player="' + CSS.escape(sampleId) + '"]');
+    if (!player) return;
+    try {
+      const response = await fetch('/admin/evaluations/api/samples/' + encodeURIComponent(sampleId) + '/audio', {headers: headers()});
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || body.detail || 'HTTP ' + response.status);
+      }
+      // The audio endpoint is admin-protected. Fetching it as a Blob preserves
+      // the Authorization header, then lets the browser's native player stream it.
+      const blob = await response.blob();
+      if (player.dataset.objectUrl) URL.revokeObjectURL(player.dataset.objectUrl);
+      const objectUrl = URL.createObjectURL(blob);
+      player.dataset.objectUrl = objectUrl;
+      player.src = objectUrl;
+      await player.play();
+      message('Playing reviewed evaluation audio locally in this browser tab.');
+    } catch (error) { message('Audio playback failed: ' + error.message); }
   }
 
   function uploadGroups(files) {
@@ -292,6 +336,7 @@
   document.addEventListener('click', event => {
     const review = event.target.closest('[data-open]');
     const download = event.target.closest('[data-download]');
+    const play = event.target.closest('[data-play]');
     const datasetDownload = event.target.closest('[data-dataset-download]');
     const saveCuration = event.target.closest('[data-save-curation]');
     if (review) openBatch(review.dataset.open);
@@ -299,6 +344,7 @@
       const sample = (state.active && state.active.samples || []).find(item => item.sample_id === download.dataset.download);
       downloadProtected('/admin/evaluations/api/samples/' + encodeURIComponent(download.dataset.download) + '/audio', sample ? sample.original_name : 'evaluation-audio');
     }
+    if (play) playProtectedAudio(play.dataset.play);
     if (datasetDownload) {
       const dataset = state.datasets.find(item => item.revision_id === datasetDownload.dataset.datasetDownload);
       downloadProtected('/admin/evaluations/api/datasets/' + encodeURIComponent(datasetDownload.dataset.datasetDownload) + '/archive',
