@@ -167,6 +167,23 @@ jobs:
           docker compose -f docker-compose.prod.yml up -d --force-recreate
           docker compose -f docker-compose.prod.yml ps
           BIND_IP=$(sed -n 's/^VG_BIND_IP=//p' .env)
-          curl -skf --resolve "voiceguard.internal:8443:${BIND_IP}" \
-            https://voiceguard.internal:8443/ping
+          # Caddy is recreated after the API and can take a few seconds to bind
+          # its VPC listener and load its persisted internal CA. Do not turn that
+          # normal startup window into a false CD failure; still fail with useful
+          # logs if the proxy never becomes ready.
+          for attempt in $(seq 1 12); do
+            if curl -skf --connect-timeout 5 \
+              --resolve "voiceguard.internal:8443:${BIND_IP}" \
+              https://voiceguard.internal:8443/ping; then
+              echo "VoiceGuard proxy health check passed on attempt ${attempt}."
+              break
+            fi
+            if [ "${attempt}" -eq 12 ]; then
+              echo "VoiceGuard proxy did not become ready after 60 seconds."
+              docker compose -f docker-compose.prod.yml logs --tail=100 caddy api
+              exit 1
+            fi
+            echo "Waiting for Caddy proxy health check (attempt ${attempt}/12)..."
+            sleep 5
+          done
           REMOTE
