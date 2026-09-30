@@ -126,6 +126,11 @@ jobs:
         run: |
           rm -f model_store/registry.jsonl
           python bundle_registry.py pull --active
+          # .dockerignore keeps inactive bundles out of the build context. Add
+          # the version selected by the remote ACTIVE pointer so candidate
+          # promotions (for example v9i) are actually baked into the image.
+          ACTIVE_VERSION=$(python -c "import json; print(json.load(open('model_store/ACTIVE.json'))[-1]['version'])")
+          echo "!model_store/${ACTIVE_VERSION}" >> .dockerignore
 
       - uses: docker/setup-buildx-action@v3
       - name: Log in to DigitalOcean Container Registry

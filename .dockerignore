@@ -23,8 +23,9 @@ governance/
 *.docx
 .pytest_cache/
 voice_guard 0ffline/
-# weights & data. The active bundle (v9h) IS baked in so the image runs fully
-# offline; the flat models/ dir and inactive bundles stay out to keep it small.
+# weights & data. CI appends an exception for the version selected by the
+# remote ACTIVE pointer before building, so the image runs fully offline while
+# inactive bundles stay out of the build context.
 models/
 model_store/*
 !model_store/ACTIVE.json
