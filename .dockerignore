@@ -31,6 +31,7 @@ model_store/*
 !model_store/ACTIVE.json
 !model_store/registry.jsonl
 !model_store/v9h
+!model_store/v9h/**
 data/
 cv-corpus-*/
 bias_audit/
