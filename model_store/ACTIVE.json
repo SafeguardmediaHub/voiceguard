@@ -38,5 +38,15 @@
     "reason": "v9fixed no better than v9h; keep v9h",
     "prev_sha": "7ee3da453de20c4b10538b3467d9e303341d3c5d28070e21cda4f0dd650b67b5",
     "entry_sha": "12316775c56b0e7eb63d662a877f4d4f4b7c813f00bde848aa827d9f982aea46"
+  },
+  {
+    "seq": 4,
+    "version": "v9i",
+    "prev_version": "v9h",
+    "activated_at": "2026-09-28T16:13:04.306197+00:00",
+    "actor": "Michael Ologungbara",
+    "reason": "[health-gate:passed]",
+    "prev_sha": "12316775c56b0e7eb63d662a877f4d4f4b7c813f00bde848aa827d9f982aea46",
+    "entry_sha": "644678d6f61d2d4e97f7c280ac3dfc3afc952057e2ecaf8177d73630f0dd4e61"
   }
 ]

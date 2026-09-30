@@ -597,6 +597,8 @@ print(f"  Cascade band: stage-1 resolves p<={CASCADE_LOW:.2f} or p>={CASCADE_HIG
 print(f"  Thresholds: to_review>={thresholds['to_review']:.2f}  "
       f"likely_fake>={thresholds['likely_fake']:.2f}  "
       f"auto_fake>={thresholds['auto_fake']:.2f}")
+if thresholds.get("likely_real") is not None:
+    print(f"  Likely-real band: {thresholds['likely_real']:.2f} <= p < {thresholds['to_review']:.2f}")
 print()
 
 
@@ -697,6 +699,8 @@ def verdict_from_score(score):
         return "LIKELY_FAKE"
     elif score >= thresholds['to_review']:
         return "REVIEW"
+    elif thresholds.get('likely_real') is not None and score >= thresholds['likely_real']:
+        return "LIKELY_REAL"
     else:
         return "AUTO_REAL"
 

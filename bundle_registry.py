@@ -336,6 +336,12 @@ def _build_cli():
     vf = sub.add_parser("verify"); vf.add_argument("version")
     ps = sub.add_parser("push"); ps.add_argument("version", nargs="?"); ps.add_argument("--active", action="store_true")
     pl = sub.add_parser("pull"); pl.add_argument("version", nargs="?"); pl.add_argument("--active", action="store_true")
+    dt = sub.add_parser("derive-thresholds",
+                        help="clone a registered bundle with a reviewed threshold-only policy candidate")
+    dt.add_argument("source_version")
+    dt.add_argument("version")
+    dt.add_argument("--likely-real", type=float, default=0.30)
+    dt.add_argument("--to-review", type=float, default=0.45)
     sub.add_parser("migrate-v9")
     lg = sub.add_parser("log"); lg.add_argument("version")
     return p
@@ -403,6 +409,57 @@ def _maybe_restart(do_restart):
     os.system(cmd)
 
 
+def derive_threshold_bundle(source_version, version, likely_real=0.30, to_review=0.45,
+                            store_dir=STORE_DIR):
+    """Create a new registered bundle with unchanged weights and new policy bands.
+
+    Thresholds are part of the atomic bundle because changing them changes what
+    production returns. This helper never promotes the candidate; an operator must
+    evaluate it and approve promotion separately.
+    """
+    if not (0.0 <= likely_real < to_review <= 1.0):
+        raise BundleError("thresholds must satisfy 0 <= likely_real < to_review <= 1")
+    reg = Registry(store_dir=store_dir)
+    source = reg.get_bundle(source_version)
+    if source is None:
+        raise BundleError(f"unknown source bundle: {source_version}")
+    if reg.get_bundle(version) is not None or os.path.exists(os.path.join(store_dir, version)):
+        raise BundleError(f"candidate version already exists: {version}")
+    source_dir = source.get("dir") or os.path.join(store_dir, source_version)
+    if not os.path.isdir(source_dir):
+        source_dir = os.path.join(store_dir, source_version)
+    if not os.path.isdir(source_dir):
+        raise BundleError(f"source bundle directory not found: {source_dir}")
+    candidate_dir = os.path.join(store_dir, version)
+    shutil.copytree(source_dir, candidate_dir)
+    try:
+        thresholds_path = os.path.join(candidate_dir, "thresholds.json")
+        with open(thresholds_path, encoding="utf-8") as f:
+            thresholds = json.load(f)
+        if not all(name in thresholds for name in ("auto_fake", "likely_fake", "to_review")):
+            raise BundleError("source thresholds.json is missing the standard fake thresholds")
+        if to_review >= float(thresholds["likely_fake"]):
+            raise BundleError("to_review must remain below likely_fake")
+        thresholds["likely_real"] = float(likely_real)
+        thresholds["to_review"] = float(to_review)
+        with open(thresholds_path, "w", encoding="utf-8") as f:
+            json.dump(thresholds, f, indent=2)
+            f.write("\n")
+        meta = read_manifest(candidate_dir)
+        meta["version"] = version
+        meta["notes"] = ((meta.get("notes", "").rstrip() +
+                          f" Threshold-only policy candidate derived from {source_version}: "
+                          f"LIKELY_REAL {likely_real:.2f}-{to_review:.2f}, REVIEW {to_review:.2f}-"
+                          f"{float(thresholds['likely_fake']):.2f}.").strip())
+        meta["verdict_thresholds"] = thresholds
+        write_manifest(candidate_dir, meta)
+        reg.register_bundle(candidate_dir)
+    except Exception:
+        shutil.rmtree(candidate_dir, ignore_errors=True)
+        raise
+    return version
+
+
 def main(argv=None):
     args = _build_cli().parse_args(argv)
     reg = Registry()
@@ -452,6 +509,9 @@ def main(argv=None):
     elif args.cmd == "pull":
         v = reg.pull(None if (args.active or not args.version) else args.version)
         print("pulled:", v, "(active)" if reg.get_active() == v else "")
+    elif args.cmd == "derive-thresholds":
+        print("derived:", derive_threshold_bundle(args.source_version, args.version,
+                                                    args.likely_real, args.to_review))
     elif args.cmd == "log":
         import tracking
         entry = reg.get_bundle(args.version)

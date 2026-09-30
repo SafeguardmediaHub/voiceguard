@@ -45,7 +45,7 @@ of truth only.
 
 | Volume | Holds | Losing it means |
 |---|---|---|
-| `voiceguard_vg-data` | `jobs.db`, `auth_keys.json`, `governance/audit_log.jsonl`, `drift/`, transient uploads | every client API key is revoked; audit chain of custody is broken |
+| `voiceguard_vg-data` | `jobs.db`, `evaluations.db`, `evaluations/`, `auth_keys.json`, `governance/audit_log.jsonl`, `drift/`, transient uploads | every client API key is revoked; audit chain of custody and evaluation history are lost |
 | `voiceguard_caddy-data` | Caddy's internal CA + issued certs | every backend that trusted the old root fails TLS verification until re-pinned |
 | `voiceguard_caddy-config` | Caddy autosave config | nothing important |
 
@@ -353,7 +353,7 @@ Then schedule the nightly run (03:30 UTC, off the CI schedule and off peak):
 
 ```bash
 cat >/etc/cron.d/voiceguard-drift <<'EOF'
-30 3 * * * root cd /srv/voiceguard && /usr/bin/docker compose -f docker-compose.prod.yml run --rm -v /srv/voiceguard/valset:/valset:ro -e DRIFT_VAL_MANIFEST=/valset/val.json api python drift_monitor_3.py --run >>/var/log/voiceguard-drift.log 2>&1
+30 3 * * * root cd /srv/voiceguard && /usr/bin/docker compose -f docker-compose.prod.yml run --rm -v /srv/voiceguard/valset:/valset:ro -e DRIFT_VAL_MANIFEST=/valset/val.json api python drift_monitor_3.py >>/var/log/voiceguard-drift.log 2>&1
 EOF
 chmod 644 /etc/cron.d/voiceguard-drift
 ```
@@ -395,6 +395,52 @@ docker compose -f docker-compose.prod.yml run --rm api python drift_monitor_3.py
 docker compose -f docker-compose.prod.yml run --rm api python drift_monitor_3.py --clear-trigger
 ```
 
+### 8.4 Internal evaluation dashboard
+
+`/admin/evaluations` is an internal, batch-oriented UI for adding **known-labelled**
+candidate audio and tracking per-source performance by date. It stores the audio,
+provenance, content hash, score and verdict in the persistent `vg-data` volume;
+the worker evaluates it with `audit=False`, so labelled test clips never enter the
+customer chain-of-custody log.
+
+Create a separate key for this interface after deployment. A normal detection key
+is deliberately rejected from all `/admin/evaluations/api/*` routes:
+
+```bash
+docker compose -f docker-compose.prod.yml exec api \
+  python auth.py create --client "evaluation-dashboard" --scope admin
+```
+
+Store the displayed plaintext in the administrator's password manager. Open the
+dashboard only through the private backend (or an SSH tunnel during administration)
+and paste this key into the page for the current tab. It is not saved by the page.
+
+For every batch, choose a source such as `elevenlabs_v3` and an immutable ground
+truth label (`fake` or `real`). A source cannot be reused with the opposite label.
+The dashboard warns for fewer than 30 usable clips and reports fake catch rate or
+real false-positive rate for each completed batch. Uploading a batch **never**
+changes `/srv/voiceguard/valset/val.json` or the nightly baseline; review candidate
+results and create a new, versioned baseline only through the deliberate Phase 17
+process.
+
+Open **Review** on a batch to see every original filename, its ground truth,
+prediction, final score, cascade use, LCNN/AASIST/Wav2Vec/RawNet3 signals, and
+XGBoost fusion contributions when stage 2 ran. The dashboard labels false
+negatives and false positives as hard cases. Its CSV export and protected
+per-file download links are a review aid for selecting a future fine-tuning
+corpus; verify provenance, consent, and labels before using any clip for training.
+
+The page splits a large selection into sequential upload groups (at most 10 files
+or 20 MiB per request), so a 50–100 clip batch can be queued without exceeding
+Caddy's 25 MiB multipart request cap. Keep each individual dashboard file below
+24 MiB to leave room for multipart overhead. The single worker processes the
+queued evaluations one at a time and gives customer detections priority.
+
+`evaluations.db` is included in the nightly encrypted backup. Audio files remain
+on the volume and are covered by a Droplet snapshot, not copied nightly to Spaces;
+set and follow an appropriate retention policy before uploading personal or
+customer audio.
+
 ---
 
 ## 9. Backups and monitoring
@@ -402,8 +448,10 @@ docker compose -f docker-compose.prod.yml run --rm api python drift_monitor_3.py
 ### 9.1 Nightly encrypted backup
 
 `deploy/backup.py` snapshots `jobs.db` through SQLite's online backup API (a plain
-file copy of a WAL-mode database is not consistent), plus `auth_keys.json` and
-`governance/audit_log.jsonl`, optionally Fernet-encrypted, to Spaces.
+file copy of a WAL-mode database is not consistent), plus `auth_keys.json`,
+`governance/audit_log.jsonl`, and `evaluations.db`, optionally Fernet-encrypted,
+to Spaces. Raw evaluation audio is deliberately not copied nightly; retain it by
+Droplet snapshot or re-upload it from its approved source.
 
 This is the **one** place production needs Spaces credentials, and they stay out
 of `.env` deliberately:
@@ -519,7 +567,7 @@ python bundle_registry.py verify v9h
 ```bash
 docker compose -f docker-compose.prod.yml down
 # decrypt if VOICEGUARD_BACKUP_KEY was set, then:
-cp jobs.db auth_keys.json /var/lib/docker/volumes/voiceguard_vg-data/_data/
+cp jobs.db evaluations.db auth_keys.json /var/lib/docker/volumes/voiceguard_vg-data/_data/
 mkdir -p /var/lib/docker/volumes/voiceguard_vg-data/_data/governance
 cp audit_log.jsonl /var/lib/docker/volumes/voiceguard_vg-data/_data/governance/
 docker compose -f docker-compose.prod.yml up -d

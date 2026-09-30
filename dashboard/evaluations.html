@@ -65,8 +65,14 @@
     <tbody id="metrics"><tr><td colspan="8" class="muted">Enter the admin key, then load dashboard.</td></tr></tbody></table></div>
   </section>
   <section class="card wide"><h2>Recent batches</h2>
-    <div class="scroll"><table><thead><tr><th>Created</th><th>Name</th><th>Source</th><th>Status</th><th>Progress</th><th></th></tr></thead>
-    <tbody id="batches"><tr><td colspan="6" class="muted">No data loaded.</td></tr></tbody></table></div>
+    <p class="muted tiny">Repeated uploads under the same source category stay separate historical batches. Use the batch name and date to distinguish each run.</p>
+    <div class="scroll"><table><thead><tr><th>Created</th><th>Batch name</th><th>Source category</th><th>Label</th><th>Status</th><th>Progress</th><th></th></tr></thead>
+    <tbody id="batches"><tr><td colspan="7" class="muted">No data loaded.</td></tr></tbody></table></div>
+    <div class="toolbar" style="justify-content:flex-end; margin-top:12px;">
+      <span id="batch-page-label" class="muted tiny"></span>
+      <button type="button" class="link-button" id="batch-prev">Previous</button>
+      <button type="button" class="link-button" id="batch-next">Next</button>
+    </div>
   </section>
   <section class="card wide"><h2>Curated training dataset revisions</h2>
     <p class="muted">Use <strong>Training</strong> only for reviewed, consented clips. Put independent clips in <strong>Validation</strong> or <strong>Holdout only</strong>; holdout audio is exported separately and must never be used for fitting or threshold tuning.</p>
@@ -81,7 +87,7 @@
   </section>
   <section class="card wide"><h2>Batch review, curation, and hard-case evidence</h2>
     <div class="toolbar">
-      <label>Batch <select id="batch-selector"><option value="">Load the dashboard first</option></select></label>
+      <label>Batch review (date · name · source · label) <select id="batch-selector"><option value="">Load the dashboard first</option></select></label>
       <label>Show <select id="sample-filter"><option value="all">All files</option><option value="mistakes">Hard cases only</option><option value="correct">Correct only</option><option value="errors">Processing errors only</option></select></label>
       <button type="button" id="open-batch">Open batch</button>
       <button type="button" id="download-hard-cases">Download hard-case CSV</button>
@@ -93,7 +99,8 @@
 </main>
 <script>
   const $ = id => document.getElementById(id);
-  const state = { batches: [], active: null, ping: null, datasets: [], curation: null };
+  const state = { batches: [], batchPage: 0, active: null, ping: null, datasets: [], curation: null };
+  const BATCHES_PER_PAGE = 10;
   // Caddy rejects a whole multipart request above 25 MiB.  Leave headroom for
   // multipart framing and upload a large selection sequentially, so 50–100
   // short clips do not depend on their combined size being below that limit.
@@ -214,6 +221,23 @@
     }).join('');
   }
 
+  function renderRecentBatches() {
+    const total = state.batches.length;
+    const pages = Math.max(1, Math.ceil(total / BATCHES_PER_PAGE));
+    state.batchPage = Math.min(state.batchPage, pages - 1);
+    const start = state.batchPage * BATCHES_PER_PAGE;
+    const visible = state.batches.slice(start, start + BATCHES_PER_PAGE);
+    $('batches').innerHTML = visible.length ? visible.map(batch =>
+      '<tr><td>' + date(batch.created_at) + '</td><td><b>' + esc(batch.name) + '</b><br><span class="tiny muted">' + esc(batch.batch_id) + '</span></td>' +
+      '<td><span class="pill">' + esc(batch.source) + '</span></td><td>' + (batch.label ? 'Fake' : 'Real') + '</td>' +
+      '<td><span class="pill">' + esc(batch.status) + '</span></td><td>' + batch.summary.done + '/' + batch.summary.total + ' complete' + (batch.summary.errors ? ', ' + batch.summary.errors + ' errors' : '') + '</td>' +
+      '<td><button type="button" class="link-button" data-open="' + esc(batch.batch_id) + '">Review</button></td></tr>'
+    ).join('') : '<tr><td colspan="7" class="muted">No batches created yet.</td></tr>';
+    $('batch-page-label').textContent = total ? 'Showing ' + (start + 1) + '–' + Math.min(start + BATCHES_PER_PAGE, total) + ' of ' + total : 'No batches';
+    $('batch-prev').disabled = state.batchPage === 0;
+    $('batch-next').disabled = state.batchPage >= pages - 1;
+  }
+
   async function openBatch(batchId) {
     const id = batchId || $('batch-selector').value;
     if (!id) { message('Choose a batch first.'); return; }
@@ -318,15 +342,17 @@
           (item.incorrect ? '<br><span class="bad">' + item.incorrect + ' hard case(s): open batch to review.</span>' : '');
         return '<tr><td>' + date(item.date) + '</td><td>' + esc(item.name) + '</td><td><span class="pill">' + esc(item.source) + '</span></td><td>' + (item.label ? 'Fake' : 'Real') + '</td><td>' + item.n + (item.errors ? ' (+' + item.errors + ' errors)' : '') + '</td><td>' + item.correct + ' / <span class="' + (item.incorrect ? 'bad' : 'good') + '">' + item.incorrect + '</span></td><td>' + result + '</td><td>' + note + '</td></tr>';
       }).join('') : '<tr><td colspan="8" class="muted">No completed candidate evaluations yet.</td></tr>';
-      $('batches').innerHTML = state.batches.length ? state.batches.map(batch => '<tr><td>' + date(batch.created_at) + '</td><td>' + esc(batch.name) + '</td><td>' + esc(batch.source) + '</td><td><span class="pill">' + esc(batch.status) + '</span></td><td>' + batch.summary.done + '/' + batch.summary.total + ' complete' + (batch.summary.errors ? ', ' + batch.summary.errors + ' errors' : '') + '</td><td><button type="button" class="link-button" data-open="' + esc(batch.batch_id) + '">Review</button></td></tr>').join('') : '<tr><td colspan="6" class="muted">No batches created yet.</td></tr>';
+      renderRecentBatches();
       const previous = $('batch-selector').value;
-      $('batch-selector').innerHTML = state.batches.length ? state.batches.map(batch => '<option value="' + esc(batch.batch_id) + '">' + esc(batch.name) + ' · ' + esc(batch.source) + '</option>').join('') : '<option value="">No batches yet</option>';
+      $('batch-selector').innerHTML = state.batches.length ? state.batches.map(batch => '<option value="' + esc(batch.batch_id) + '">' + date(batch.created_at) + ' · ' + esc(batch.name) + ' · ' + esc(batch.source) + ' · ' + (batch.label ? 'Fake' : 'Real') + '</option>').join('') : '<option value="">No batches yet</option>';
       if (state.batches.some(batch => batch.batch_id === previous)) $('batch-selector').value = previous;
       if (showMessage) message('Dashboard updated. Open a batch to inspect every file and hard case.');
     } catch (error) { message('Could not load dashboard: ' + error.message); }
   }
 
   $('load-dashboard').addEventListener('click', () => refreshAll());
+  $('batch-prev').addEventListener('click', () => { if (state.batchPage > 0) { state.batchPage -= 1; renderRecentBatches(); } });
+  $('batch-next').addEventListener('click', () => { if ((state.batchPage + 1) * BATCHES_PER_PAGE < state.batches.length) { state.batchPage += 1; renderRecentBatches(); } });
   $('open-batch').addEventListener('click', () => openBatch());
   $('sample-filter').addEventListener('change', renderSamples);
   $('download-hard-cases').addEventListener('click', () => {

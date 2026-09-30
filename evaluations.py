@@ -368,7 +368,10 @@ def sample_outcome(label, status, result):
     if status != "done" or not isinstance(result, dict):
         return {"state": status, "correct": None, "kind": "error" if status == "error" else "pending"}
     verdict = result.get("verdict")
-    predicted_label = 0 if verdict == "AUTO_REAL" else 1
+    # REVIEW is an escalation, not a confirmed fake. LIKELY_REAL is an explicit
+    # low-risk band introduced by the threshold-only policy candidate; both are
+    # real-side outcomes for labelled batch metrics.
+    predicted_label = 1 if verdict in {"REVIEW", "LIKELY_FAKE", "AUTO_FAKE"} else 0
     correct = predicted_label == int(label)
     kind = "correct"
     if not correct:

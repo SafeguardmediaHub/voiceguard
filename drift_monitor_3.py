@@ -124,6 +124,7 @@ DRIFT_CONFIRM_RUNS = int(os.environ.get('DRIFT_CONFIRM_RUNS', 2))
 T_AUTO_FAKE = 0.85
 T_LIKELY    = 0.55
 T_REVIEW    = 0.30
+T_LIKELY_REAL = None
 
 # Drift detection thresholds
 ALERT_THRESHOLDS = {
@@ -215,15 +216,18 @@ def load_models():
     Returns the imported `server` module, which exposes `ensemble_score_variants`,
     `lcnn_score`, `cascade_score_chunk`, `thresholds`, `ACTIVE_VERSION`, `CHUNK`.
     """
-    global T_AUTO_FAKE, T_LIKELY, T_REVIEW
+    global T_AUTO_FAKE, T_LIKELY, T_REVIEW, T_LIKELY_REAL
     log.info("Importing deployed scoring (server active bundle)...")
     import detector as server
     # Sync verdict thresholds to the active bundle so drift verdicts match production.
     T_AUTO_FAKE = float(server.thresholds['auto_fake'])
     T_LIKELY    = float(server.thresholds['likely_fake'])
     T_REVIEW    = float(server.thresholds['to_review'])
+    T_LIKELY_REAL = (float(server.thresholds['likely_real'])
+                     if server.thresholds.get('likely_real') is not None else None)
     log.info(f"Active bundle: {server.ACTIVE_VERSION} | thresholds "
-             f"auto_fake>={T_AUTO_FAKE} likely_fake>={T_LIKELY} to_review>={T_REVIEW}")
+             f"auto_fake>={T_AUTO_FAKE} likely_fake>={T_LIKELY} "
+             f"to_review>={T_REVIEW} likely_real>={T_LIKELY_REAL}")
     return server
 
 def calibrate(p_raw, coef, intercept, eps=1e-6):
@@ -235,7 +239,13 @@ def verdict_from_score(score):
     if score >= T_AUTO_FAKE: return 'auto_fake'
     if score >= T_LIKELY:    return 'likely_fake'
     if score >= T_REVIEW:    return 'to_review'
+    if T_LIKELY_REAL is not None and score >= T_LIKELY_REAL: return 'likely_real'
     return 'auto_real'
+
+
+def is_fake_flag(verdict):
+    """A review is an escalation; only fake-side verdicts count as flagged fake."""
+    return verdict in {'to_review', 'likely_fake', 'auto_fake'}
 
 def score_one(server, audio_np):
     """Score one clip through the deployed model, exactly as server.py serves it.
@@ -366,10 +376,10 @@ def evaluate_clean(models, val_df, n_samples, seed=SEED):
 
         n_src = int(mask.sum())
         vc = {v: sum(1 for x in src_verdicts if x == v)
-              for v in ['auto_fake', 'likely_fake', 'to_review', 'auto_real']}
+              for v in ['auto_fake', 'likely_fake', 'to_review', 'likely_real', 'auto_real']}
         if src_labels[0] == 1:  # fake source — catch rate (ensemble + deployed cascade)
-            caught     = sum(1 for v in src_verdicts if v != 'auto_real')
-            dep_caught = sum(1 for v in src_dep_verd if v != 'auto_real')
+            caught     = sum(1 for v in src_verdicts if is_fake_flag(v))
+            dep_caught = sum(1 for v in src_dep_verd if is_fake_flag(v))
             per_source[src] = {
                 'n': n_src,
                 'catch_rate':          caught / n_src if n_src else 0.0,
@@ -377,8 +387,8 @@ def evaluate_clean(models, val_df, n_samples, seed=SEED):
                 'verdict_counts': vc,
             }
         else:  # real source — false positive rate (ensemble + deployed cascade)
-            fp     = sum(1 for v in src_verdicts if v != 'auto_real')
-            dep_fp = sum(1 for v in src_dep_verd if v != 'auto_real')
+            fp     = sum(1 for v in src_verdicts if is_fake_flag(v))
+            dep_fp = sum(1 for v in src_dep_verd if is_fake_flag(v))
             per_source[src] = {
                 'n': n_src,
                 'false_positive_rate':          fp / n_src if n_src else 0.0,
@@ -409,8 +419,8 @@ def evaluate_clean(models, val_df, n_samples, seed=SEED):
 
 def evaluate_noizai(models, noizai_dir):
     """Run V8 on every Noiz.ai sample; return catch rate.
-    Catch rate = fraction scored anything other than auto_real.
-    This is an intentionally broad definition; to_review counts as caught.
+    Catch rate = fraction scored as a fake-side verdict. REVIEW remains an
+    escalation flag; LIKELY_REAL is counted on the real side when present.
     """
     if not os.path.isdir(noizai_dir):
         return {'available': False, 'reason': f'directory not found: {noizai_dir}'}
@@ -442,8 +452,8 @@ def evaluate_noizai(models, noizai_dir):
             log.warning(f"Skipping {fpath}: {e}")
 
     n_total  = len(results)
-    n_caught = sum(1 for r in results if r['verdict'] != 'auto_real')
-    n_dep_caught = sum(1 for r in results if r['deployed_verdict'] != 'auto_real')
+    n_caught = sum(1 for r in results if is_fake_flag(r['verdict']))
+    n_dep_caught = sum(1 for r in results if is_fake_flag(r['deployed_verdict']))
     n_stage1 = sum(1 for r in results if r['stage'] == 1)
     return {
         'available':  True,
